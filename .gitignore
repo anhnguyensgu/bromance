@@ -1,0 +1,36 @@
+# Zig build artifacts
+zig-cache/
+zig-cache-*/
+zig-out/
+
+# Compiled objects and libraries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.pdb
+
+# Editors/IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Node/JS (if present in workspace)
+node_modules/
+dist/
+coverage/
