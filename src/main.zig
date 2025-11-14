@@ -1,5 +1,4 @@
 const std = @import("std");
-const GameClient = @import("client.zig").GameClient;
 const rl = @import("raylib");
 
 // Tile grid shared by world render and minimap so visuals match
@@ -7,17 +6,25 @@ const TILES_X: i32 = 50;
 const TILES_Y: i32 = 50;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-
-    const allocator = gpa.allocator();
-    var client = try GameClient.init(allocator);
-    defer client.deinit();
-
-    client.bootstrap();
-    client.renderFrame();
     try runRaylib();
 }
+
+const World = struct {
+    width: f32,
+    height: f32,
+    const Self = @This();
+
+    pub fn new(width: f32, height: f32) Self {
+        return Self{
+            .width = width,
+            .height = height,
+        };
+    }
+
+    pub fn boundaryCheck(_: *Self) bool {
+        return false;
+    }
+};
 
 pub fn runRaylib() anyerror!void {
     const WORLD_W: f32 = 2000;

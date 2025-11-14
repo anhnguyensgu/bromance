@@ -4,11 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const dep_sokol = b.dependency("sokol", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     const raylib_dep = b.dependency("raylib_zig", .{
         .target = target,
         .optimize = optimize,
@@ -17,16 +12,18 @@ pub fn build(b: *std.Build) void {
     const raygui = raylib_dep.module("raygui"); // raygui module
     const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
 
+    // Shared module (pure Zig, reused by client & server)
+    const shared_mod = b.addModule("shared", .{
+        .root_source_file = b.path("src/shared.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const root_module = b.addModule("zig_client_root", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{
-            .{
-                .name = "sokol",
-                .module = dep_sokol.module("sokol"),
-            },
-        },
+        .imports = &.{ .{ .name = "shared", .module = shared_mod } },
     });
 
     const exe = b.addExecutable(.{
@@ -49,4 +46,17 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run the zig-client demo");
     run_step.dependOn(&run_cmd.step);
+
+    // Server executable (pure Zig, imports shared)
+    const server_mod = b.addModule("zig_server_root", .{
+        .root_source_file = b.path("src/server_main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{ .{ .name = "shared", .module = shared_mod } },
+    });
+    const server_exe = b.addExecutable(.{ .name = "zig-server", .root_module = server_mod });
+    b.installArtifact(server_exe);
+    const run_server = b.addRunArtifact(server_exe);
+    run_server.step.dependOn(b.getInstallStep());
+    b.step("run-server", "Run the zig server").dependOn(&run_server.step);
 }
