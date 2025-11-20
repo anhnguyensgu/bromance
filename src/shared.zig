@@ -2,7 +2,7 @@ const std = @import("std");
 const command = @import("movement/command.zig");
 const MovementCommand = command.MovementCommand;
 
-pub const protocol_version: u32 = 1;
+pub const network = @import("network.zig");
 
 pub const PlayerState = struct {
     x: f32,
