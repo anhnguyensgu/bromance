@@ -1,5 +1,9 @@
 const std = @import("std");
 const rl = @import("raylib");
+const shared = @import("shared.zig");
+const network = shared.network;
+const PingPayload = @import("ping/command.zig").PingPayload;
+const MovementCommand = @import("movement/command.zig").MovementCommand;
 
 // Tile grid shared by world render and minimap so visuals match
 const TILES_X: i32 = 50;
@@ -61,17 +65,40 @@ pub fn runRaylib() anyerror!void {
     const minimap = try rl.loadRenderTexture(MINIMAP_SIZE, MINIMAP_SIZE);
     defer rl.unloadRenderTexture(minimap);
 
+    const move_send_interval: f32 = 0.1;
+    var move_accum: f32 = 0.0;
+    var pending_move: ?MovementCommand = null;
+    var udp_client = try UdpClient.init(.{ .server_ip = "127.0.0.1", .server_port = 9999 });
+    defer udp_client.deinit();
+    udp_client.sendPing() catch |err| std.debug.print("failed to send ping: {s}\n", .{@errorName(err)});
+    var server_target = player;
+    var has_server_target = false;
+    const correction_threshold: f32 = 2.0;
+
     while (!rl.windowShouldClose()) {
         const dt = rl.getFrameTime();
 
         if (rl.isKeyDown(.down)) {
             player.y += speed * dt;
+            pending_move = MovementCommand{ .direction = .Down, .speed = speed, .delta = dt };
         } else if (rl.isKeyDown(.up)) {
             player.y -= speed * dt;
+            pending_move = MovementCommand{ .direction = .Up, .speed = speed, .delta = dt };
         } else if (rl.isKeyDown(.right)) {
             player.x += speed * dt;
+            pending_move = MovementCommand{ .direction = .Right, .speed = speed, .delta = dt };
         } else if (rl.isKeyDown(.left)) {
             player.x -= speed * dt;
+            pending_move = MovementCommand{ .direction = .Left, .speed = speed, .delta = dt };
+        } else {
+            pending_move = null;
+        }
+        move_accum += dt;
+        if (move_accum >= move_send_interval) {
+            move_accum = 0;
+            if (pending_move) |cmd| {
+                udp_client.sendMove(cmd) catch |err| std.debug.print("failed to send move: {s}\n", .{@errorName(err)});
+            }
         }
 
         // Clamp to world bounds
@@ -199,8 +226,102 @@ pub fn runRaylib() anyerror!void {
             20,
             .dark_gray,
         );
+
+        if (udp_client.pollState()) |state| {
+            server_target = rl.Vector2{ .x = state.x, .y = state.y };
+            has_server_target = true;
+        }
+        if (has_server_target) {
+            const diff_x = server_target.x - player.x;
+            const diff_y = server_target.y - player.y;
+            if (@abs(diff_x) > correction_threshold or @abs(diff_y) > correction_threshold) {
+                const blend = std.math.clamp(dt * 10.0, 0.0, 1.0);
+                player.x += diff_x * blend;
+                player.y += diff_y * blend;
+            }
+        }
     }
 }
+
+const UdpClient = struct {
+    sock: std.posix.socket_t,
+    server_addr: std.net.Address,
+    recv_buf: [512]u8 = undefined,
+    last_state: ?network.StatePayload = null,
+
+    pub fn init(config: struct { server_ip: []const u8, server_port: u16 }) !UdpClient {
+        const addr = try std.net.Address.parseIp4(config.server_ip, config.server_port);
+        const sock = try std.posix.socket(addr.any.family, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
+        return .{ .sock = sock, .server_addr = addr };
+    }
+
+    pub fn deinit(self: *UdpClient) void {
+        std.posix.close(self.sock);
+    }
+
+    pub fn sendPing(self: *UdpClient) !void {
+        const payload = network.PacketPayload{ .ping = PingPayload{ .timestamp = @as(u64, @intCast(std.time.timestamp())) } };
+        const header = network.PacketHeader{
+            .msg_type = .ping,
+            .flags = .{ .reliable = true, .requires_ack = true },
+            .session_id = 0,
+            .sequence = 0,
+            .ack = 0,
+            .payload_len = @intCast(PingPayload.size()),
+        };
+        var buffer: [network.packet_header_size + PingPayload.size()]u8 = undefined;
+        const packet = network.Packet{ .header = header, .payload = payload };
+        try packet.encode(buffer[0..]);
+        const len = network.packet_header_size + PingPayload.size();
+        _ = try std.posix.sendto(self.sock, buffer[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
+    }
+
+    pub fn sendMove(self: *UdpClient, move: MovementCommand) !void {
+        const payload = network.PacketPayload{ .move = move };
+        const header = network.PacketHeader{
+            .msg_type = .move,
+            .flags = .{ .reliable = true },
+            .session_id = 0,
+            .sequence = 0,
+            .ack = 0,
+            .payload_len = @intCast(MovementCommand.size()),
+        };
+        var buffer: [network.packet_header_size + MovementCommand.size()]u8 = undefined;
+        const packet = network.Packet{ .header = header, .payload = payload };
+        try packet.encode(buffer[0..]);
+        const len = network.packet_header_size + MovementCommand.size();
+        _ = try std.posix.sendto(self.sock, buffer[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
+    }
+
+    pub fn pollState(self: *UdpClient) ?network.StatePayload {
+        var addr_storage: std.posix.sockaddr.storage = undefined;
+        var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr.storage);
+        const received = std.posix.recvfrom(
+            self.sock,
+            &self.recv_buf,
+            std.posix.MSG.DONTWAIT,
+            @ptrCast(&addr_storage),
+            &addr_len,
+        ) catch |err| {
+            if (err == error.WouldBlock) return null;
+            std.debug.print("recv error: {s}\n", .{@errorName(err)});
+            return null;
+        };
+
+        const packet = network.Packet.decode(self.recv_buf[0..received]) catch |err| {
+            std.debug.print("decode error: {s}\n", .{@errorName(err)});
+            return null;
+        };
+        switch (packet.payload) {
+            .state_update => |state| {
+                std.debug.print("server pos: {d:.2}, {d:.2}\n", .{ state.x, state.y });
+                self.last_state = state;
+                return state;
+            },
+            else => return null,
+        }
+    }
+};
 
 fn updateMinimap(mm: rl.RenderTexture2D, player: rl.Vector2, world_w: f32, world_h: f32, mm_size: i32) void {
     rl.beginTextureMode(mm);

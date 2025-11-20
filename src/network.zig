@@ -1,8 +1,8 @@
 const std = @import("std");
 const wire_endian = std.builtin.Endian.big;
 
-const MovePayload = @import("movement/command.zig").MovementCommand;
-const PingPayload = @import("ping/command.zig").PingPayload;
+pub const MovePayload = @import("movement/command.zig").MovementCommand;
+pub const PingPayload = @import("ping/command.zig").PingPayload;
 
 pub const protocol_version: u8 = 1;
 pub const packet_magic = [2]u8{ 0xAB, 0xCD };
@@ -11,17 +11,45 @@ pub const packet_header_size: usize = 19;
 pub const PacketType = enum(u8) {
     ping = 1,
     move = 2,
+    state_update = 3,
+};
+
+pub const StatePayload = struct {
+    x: f32,
+    y: f32,
+
+    pub fn size() usize {
+        return 8;
+    }
+
+    pub fn encode(self: StatePayload, dest: []u8) ![]u8 {
+        if (dest.len < size()) return error.BufferTooSmall;
+        const slice = dest[0..size()];
+        std.mem.writeInt(u32, slice[0..4], @as(u32, @bitCast(self.x)), wire_endian);
+        std.mem.writeInt(u32, slice[4..8], @as(u32, @bitCast(self.y)), wire_endian);
+        return slice;
+    }
+
+    pub fn decode(buf: []const u8) !StatePayload {
+        if (buf.len < size()) return error.BufferTooSmall;
+        return .{
+            .x = @as(f32, @bitCast(std.mem.readInt(u32, buf[0..4], wire_endian))),
+            .y = @as(f32, @bitCast(std.mem.readInt(u32, buf[4..8], wire_endian))),
+        };
+    }
 };
 
 pub const PacketPayload = union(PacketType) {
     ping: PingPayload,
     move: MovePayload,
+    state_update: StatePayload,
     const Self = @This();
 
     pub fn decodePayload(header: *const PacketHeader, payload: []const u8) !Self {
         switch (header.msg_type) {
             .ping => return .{ .ping = try decodeGenericPayload(PingPayload, payload) },
             .move => return .{ .move = try decodeGenericPayload(MovePayload, payload) },
+            .state_update => return .{ .state_update = try decodeGenericPayload(StatePayload, payload) },
         }
     }
 
@@ -29,6 +57,7 @@ pub const PacketPayload = union(PacketType) {
         switch (self) {
             .ping => |b| return try encodeGenericPayload(PingPayload, b),
             .move => |b| return try encodeGenericPayload(MovePayload, b),
+            .state_update => |b| return try encodeGenericPayload(StatePayload, b),
         }
     }
 };
@@ -178,10 +207,15 @@ pub const Packet = struct {
                 const encoded = try payload_move.encode(&tmp);
                 std.mem.copyForwards(u8, body_slice, encoded);
             },
+            .state_update => |payload_state| {
+                var tmp: [StatePayload.size()]u8 = undefined;
+                const encoded = try payload_state.encode(&tmp);
+                std.mem.copyForwards(u8, body_slice, encoded);
+            },
         }
     }
 
-    pub fn decode(buffer: []u8) !Packet {
+    pub fn decode(buffer: []const u8) !Packet {
         const header = try PacketHeader.decode(buffer[0..packet_header_size]);
         const payload_slice = buffer[packet_header_size .. packet_header_size + header.payload_len];
         const payload = try PacketPayload.decodePayload(&header, payload_slice);
@@ -271,6 +305,15 @@ test "packet move payload round trips through PacketPayload union" {
     try std.testing.expectEqual(move.speed, decoded_payload.move.speed);
     try std.testing.expectEqual(move.delta, decoded_payload.move.delta);
     try expectHeaderRoundTrip(header);
+}
+
+test "packet state payload encodes and decodes" {
+    const payload = StatePayload{ .x = 10.5, .y = -4.25 };
+    var buf: [StatePayload.size()]u8 = undefined;
+    const encoded = try payload.encode(&buf);
+    const decoded = try StatePayload.decode(encoded);
+    try std.testing.expectEqual(payload.x, decoded.x);
+    try std.testing.expectEqual(payload.y, decoded.y);
 }
 
 fn expectHeaderRoundTrip(header: PacketHeader) !void {

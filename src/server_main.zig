@@ -2,10 +2,12 @@ const std = @import("std");
 const posix = std.posix;
 
 const shared = @import("shared.zig");
+const network = shared.network;
 
 const UdpEchoServer = struct {
     sock: posix.socket_t,
     buffer: [1024]u8 = undefined,
+    player_pos: shared.PlayerState = .{ .x = 0, .y = 0 },
 
     pub fn init(bind_port: u16) !UdpEchoServer {
         const listen_address = try std.net.Address.parseIp4("0.0.0.0", bind_port);
@@ -54,26 +56,49 @@ const UdpEchoServer = struct {
 
         //parse packet
         const payload = self.buffer[0..received];
-        const Packet = shared.network.Packet;
-        const msg = try Packet.decode(payload[0..received]);
-        switch (msg.payload) {
+        const packet = try network.Packet.decode(payload);
+        switch (packet.payload) {
             .ping => |p| {
                 std.debug.print("ping payload timestamp: {d}\n", .{p.timestamp});
+                try self.sendState(&addr);
             },
             .move => |m| {
                 std.debug.print("move payload direction: {any}\n", .{m.direction});
+                self.integrateMove(m);
+                try self.sendState(&addr);
             },
+            .state_update => {},
         }
+    }
 
-        //echo back
+    fn integrateMove(self: *UdpEchoServer, move: network.MovePayload) void {
+        var pos = self.player_pos;
+        switch (move.direction) {
+            .Up => pos.y -= move.speed * move.delta,
+            .Down => pos.y += move.speed * move.delta,
+            .Left => pos.x -= move.speed * move.delta,
+            .Right => pos.x += move.speed * move.delta,
+        }
+        pos.x = std.math.clamp(pos.x, 0, 1000);
+        pos.y = std.math.clamp(pos.y, 0, 1000);
+        self.player_pos = pos;
+    }
 
-        _ = try posix.sendto(
-            self.sock,
-            payload,
-            0,
-            &addr.any,
-            addr.getOsSockLen(),
-        );
+    fn sendState(self: *UdpEchoServer, addr: *const std.net.Address) !void {
+        const payload = network.PacketPayload{ .state_update = network.StatePayload{ .x = self.player_pos.x, .y = self.player_pos.y } };
+        const header = network.PacketHeader{
+            .msg_type = .state_update,
+            .flags = .{ .reliable = true },
+            .session_id = 0,
+            .sequence = 0,
+            .ack = 0,
+            .payload_len = @intCast(network.StatePayload.size()),
+        };
+        var buffer: [network.packet_header_size + network.StatePayload.size()]u8 = undefined;
+        const packet = network.Packet{ .header = header, .payload = payload };
+        try packet.encode(buffer[0..]);
+        const len = network.packet_header_size + network.StatePayload.size();
+        _ = try posix.sendto(self.sock, buffer[0..len], 0, &addr.any, addr.getOsSockLen());
     }
 };
 
@@ -100,7 +125,6 @@ test "udp client receives echoed ping payload from localhost server" {
     defer posix.close(client_sock);
 
     const PingPayload = @import("ping/command.zig").PingPayload;
-    const network = shared.network;
     const packet_header_size = network.packet_header_size;
     var packet: [packet_header_size + PingPayload.size()]u8 = undefined;
     const payload = network.PacketPayload{ .ping = PingPayload{ .timestamp = @as(u64, @intCast(std.time.timestamp())) } };
@@ -150,7 +174,6 @@ test "udp client receives echoed move payload from localhost server" {
     defer posix.close(client_sock);
 
     const MovePayload = @import("movement/command.zig").MovementCommand;
-    const network = shared.network;
     const packet_header_size = network.packet_header_size;
     var packet: [packet_header_size + MovePayload.size()]u8 = undefined;
     const payload = network.PacketPayload{ .move = MovePayload{
