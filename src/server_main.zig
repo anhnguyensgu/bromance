@@ -57,15 +57,16 @@ const UdpEchoServer = struct {
         //parse packet
         const payload = self.buffer[0..received];
         const packet = try network.Packet.decode(payload);
+        const ack_seq = packet.header.sequence;
         switch (packet.payload) {
             .ping => |p| {
                 std.debug.print("ping payload timestamp: {d}\n", .{p.timestamp});
-                try self.sendState(&addr);
+                try self.sendState(&addr, ack_seq);
             },
             .move => |m| {
                 std.debug.print("move payload direction: {any}\n", .{m.direction});
                 self.integrateMove(m);
-                try self.sendState(&addr);
+                try self.sendState(&addr, ack_seq);
             },
             .state_update => {},
         }
@@ -84,14 +85,18 @@ const UdpEchoServer = struct {
         self.player_pos = pos;
     }
 
-    fn sendState(self: *UdpEchoServer, addr: *const std.net.Address) !void {
-        const payload = network.PacketPayload{ .state_update = network.StatePayload{ .x = self.player_pos.x, .y = self.player_pos.y } };
+    fn sendState(self: *UdpEchoServer, addr: *const std.net.Address, ack_seq: u32) !void {
+        const payload = network.PacketPayload{ .state_update = network.StatePayload{
+            .x = self.player_pos.x,
+            .y = self.player_pos.y,
+            .timestamp_ns = @intCast(std.time.nanoTimestamp()),
+        } };
         const header = network.PacketHeader{
             .msg_type = .state_update,
             .flags = .{ .reliable = true },
             .session_id = 0,
             .sequence = 0,
-            .ack = 0,
+            .ack = ack_seq,
             .payload_len = @intCast(network.StatePayload.size()),
         };
         var buffer: [network.packet_header_size + network.StatePayload.size()]u8 = undefined;
@@ -158,7 +163,12 @@ test "udp client receives echoed ping payload from localhost server" {
         &response_addr_len,
     );
 
-    try std.testing.expectEqualStrings(packet[0..], buffer[0..received]);
+    const response = try network.Packet.decode(buffer[0..received]);
+    try std.testing.expectEqual(network.PacketType.state_update, response.header.msg_type);
+    try std.testing.expectEqual(@as(u32, 0x0A0B0C0D), response.header.ack);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), response.payload.state_update.x, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), response.payload.state_update.y, 0.0001);
+    try std.testing.expect(response.payload.state_update.timestamp_ns != 0);
 }
 
 test "udp client receives echoed move payload from localhost server" {
@@ -211,5 +221,10 @@ test "udp client receives echoed move payload from localhost server" {
         &response_addr_len,
     );
 
-    try std.testing.expectEqualStrings(packet[0..], buffer[0..received]);
+    const response = try network.Packet.decode(buffer[0..received]);
+    try std.testing.expectEqual(network.PacketType.state_update, response.header.msg_type);
+    try std.testing.expectEqual(@as(u32, 1), response.header.ack);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), response.payload.state_update.x, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), response.payload.state_update.y, 0.0001);
+    try std.testing.expect(response.payload.state_update.timestamp_ns != 0);
 }

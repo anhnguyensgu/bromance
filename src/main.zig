@@ -1,9 +1,11 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("shared.zig");
-const network = shared.network;
-const PingPayload = @import("ping/command.zig").PingPayload;
-const MovementCommand = @import("movement/command.zig").MovementCommand;
+const command = @import("movement/command.zig");
+const MovementCommand = command.MovementCommand;
+const MoveDirection = command.MoveDirection;
+const client = @import("client/udp_client.zig");
+const UdpClient = client.UdpClient;
+const applyMoveToVector = client.applyMoveToVector;
 
 // Tile grid shared by world render and minimap so visuals match
 const TILES_X: i32 = 50;
@@ -12,23 +14,6 @@ const TILES_Y: i32 = 50;
 pub fn main() !void {
     try runRaylib();
 }
-
-const World = struct {
-    width: f32,
-    height: f32,
-    const Self = @This();
-
-    pub fn new(width: f32, height: f32) Self {
-        return Self{
-            .width = width,
-            .height = height,
-        };
-    }
-
-    pub fn boundaryCheck(_: *Self) bool {
-        return false;
-    }
-};
 
 pub fn runRaylib() anyerror!void {
     const WORLD_W: f32 = 2000;
@@ -45,11 +30,26 @@ pub fn runRaylib() anyerror!void {
     //--------------------------------------------------------------------------------------
 
     // Main game loop
-    var player = rl.Vector2{ .x = 350, .y = 200 };
-    const player_size = rl.Vector2{ .x = 50, .y = 50 };
+    const img = try rl.loadImage("assets/combined_sprite_sheet_48x48.png");
+    defer rl.unloadImage(img);
+    const char_texture = try rl.loadTextureFromImage(img);
+    defer rl.unloadTexture(char_texture);
+    const terrain_img = try rl.loadImage("assets/terrain_sprites.png");
+    defer rl.unloadImage(terrain_img);
+    const terrain_texture = try rl.loadTextureFromImage(terrain_img);
+    defer rl.unloadTexture(terrain_texture);
+    var player = Character{
+        .pos = rl.Vector2{ .x = 350, .y = 200 },
+        .size = rl.Vector2{ .x = 50, .y = 50 },
+        .is_moving = false,
+        .char_texture = char_texture,
+        .dir = .Up,
+        .frame_index = 0,
+        .anim_timer = 0,
+    };
     const speed = 200;
     var camera = rl.Camera2D{
-        .target = .init(player.x + 20, player.y + 20),
+        .target = .init(player.pos.x + 20, player.pos.y + 20),
         .offset = .init(screenWidth / 2, screenHeight / 2),
         .rotation = 0,
         .zoom = 1,
@@ -65,31 +65,32 @@ pub fn runRaylib() anyerror!void {
     const minimap = try rl.loadRenderTexture(MINIMAP_SIZE, MINIMAP_SIZE);
     defer rl.unloadRenderTexture(minimap);
 
-    const move_send_interval: f32 = 0.1;
+    const move_send_interval: f32 = 0.05;
     var move_accum: f32 = 0.0;
     var pending_move: ?MovementCommand = null;
     var udp_client = try UdpClient.init(.{ .server_ip = "127.0.0.1", .server_port = 9999 });
     defer udp_client.deinit();
     udp_client.sendPing() catch |err| std.debug.print("failed to send ping: {s}\n", .{@errorName(err)});
-    var server_target = player;
-    var has_server_target = false;
-    const correction_threshold: f32 = 2.0;
 
     while (!rl.windowShouldClose()) {
         const dt = rl.getFrameTime();
 
         if (rl.isKeyDown(.down)) {
-            player.y += speed * dt;
-            pending_move = MovementCommand{ .direction = .Down, .speed = speed, .delta = dt };
+            const cmd = MovementCommand{ .direction = .Down, .speed = speed, .delta = dt };
+            applyMoveToVector(&player.pos, cmd);
+            pending_move = cmd;
         } else if (rl.isKeyDown(.up)) {
-            player.y -= speed * dt;
-            pending_move = MovementCommand{ .direction = .Up, .speed = speed, .delta = dt };
+            const cmd = MovementCommand{ .direction = .Up, .speed = speed, .delta = dt };
+            applyMoveToVector(&player.pos, cmd);
+            pending_move = cmd;
         } else if (rl.isKeyDown(.right)) {
-            player.x += speed * dt;
-            pending_move = MovementCommand{ .direction = .Right, .speed = speed, .delta = dt };
+            const cmd = MovementCommand{ .direction = .Right, .speed = speed, .delta = dt };
+            applyMoveToVector(&player.pos, cmd);
+            pending_move = cmd;
         } else if (rl.isKeyDown(.left)) {
-            player.x -= speed * dt;
-            pending_move = MovementCommand{ .direction = .Left, .speed = speed, .delta = dt };
+            const cmd = MovementCommand{ .direction = .Left, .speed = speed, .delta = dt };
+            applyMoveToVector(&player.pos, cmd);
+            pending_move = cmd;
         } else {
             pending_move = null;
         }
@@ -100,15 +101,20 @@ pub fn runRaylib() anyerror!void {
                 udp_client.sendMove(cmd) catch |err| std.debug.print("failed to send move: {s}\n", .{@errorName(err)});
             }
         }
+        if (pending_move) |cmd| {
+            player.update(dt, cmd.direction, true);
+        } else {
+            player.update(dt, .Down, false);
+        }
 
         // Clamp to world bounds
-        if (player.x < 0) player.x = 0;
-        if (player.y < 0) player.y = 0;
-        if (player.x > WORLD_W - player_size.x) player.x = WORLD_W - player_size.x;
-        if (player.y > WORLD_H - player_size.y) player.y = WORLD_H - player_size.y;
+        if (player.pos.x < 0) player.pos.x = 0;
+        if (player.pos.y < 0) player.pos.y = 0;
+        if (player.pos.x > WORLD_W - player.size.x) player.pos.x = WORLD_W - player.size.x;
+        if (player.pos.y > WORLD_H - player.size.y) player.pos.y = WORLD_H - player.size.y;
 
         // Update minimap texture
-        updateMinimap(minimap, player, WORLD_W, WORLD_H, MINIMAP_SIZE);
+        updateMinimap(minimap, player.pos, WORLD_W, WORLD_H, MINIMAP_SIZE);
 
         rl.beginDrawing();
         defer rl.endDrawing();
@@ -119,8 +125,8 @@ pub fn runRaylib() anyerror!void {
         const view_half_w: f32 = (@as(f32, @floatFromInt(screenWidth)) * 0.5) / camera.zoom;
         const view_half_h: f32 = (@as(f32, @floatFromInt(screenHeight)) * 0.5) / camera.zoom;
 
-        var cam_target_x: f32 = player.x + player_size.x * 0.5;
-        var cam_target_y: f32 = player.y + player_size.y * 0.5;
+        var cam_target_x: f32 = player.pos.x + player.size.x * 0.5;
+        var cam_target_y: f32 = player.pos.y + player.size.y * 0.5;
 
         // Convert minimap occupied pixels into world-units margins on the top/left.
         // Reserve: minimap size + UI margin + a small player-safe pad, so the world
@@ -157,8 +163,8 @@ pub fn runRaylib() anyerror!void {
         // Avoid covering player with a fixed minimap by shifting camera target
         // so the player's projected screen position stays outside the minimap rect
         const UI_SAFE_MARGIN: f32 = 8.0;
-        const player_center_x: f32 = player.x + player_size.x * 0.5;
-        const player_center_y: f32 = player.y + player_size.y * 0.5;
+        const player_center_x: f32 = player.pos.x + player.size.x * 0.5;
+        const player_center_y: f32 = player.pos.y + player.size.y * 0.5;
 
         // Compute player's screen position for the current (clamped) camera
         var px_screen: f32 = (player_center_x - cam_target_x) * camera.zoom + camera.offset.x;
@@ -198,8 +204,8 @@ pub fn runRaylib() anyerror!void {
         camera.begin();
         rl.clearBackground(.white);
         // Draw world tiles matching the minimap pattern
-        drawWorldTiles(WORLD_W, WORLD_H);
-        rl.drawRectangleV(player, player_size, .blue);
+        drawWorldTiles(terrain_texture, WORLD_W, WORLD_H);
+        try player.draw();
         camera.end();
 
         // UI: draw the minimap (note the source height is flipped for render textures)
@@ -218,7 +224,7 @@ pub fn runRaylib() anyerror!void {
         rl.drawTexturePro(minimap.texture, src, dst, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
         rl.drawRectangleLines(@intFromFloat(dst.x), @intFromFloat(dst.y), MINIMAP_SIZE, MINIMAP_SIZE, .black);
         var buf: [128]u8 = undefined;
-        const pos_text = std.fmt.bufPrintZ(&buf, "Player: ({:.0}, {:.0})", .{ player.x, player.y }) catch "";
+        const pos_text = std.fmt.bufPrintZ(&buf, "Player: ({:.0}, {:.0})", .{ player.pos.x, player.pos.y }) catch "";
         rl.drawText(
             pos_text,
             MINIMAP_SIZE + @as(i32, @intFromFloat(MINIMAP_POS.x)) + 10,
@@ -227,101 +233,12 @@ pub fn runRaylib() anyerror!void {
             .dark_gray,
         );
 
-        if (udp_client.pollState()) |state| {
-            server_target = rl.Vector2{ .x = state.x, .y = state.y };
-            has_server_target = true;
-        }
-        if (has_server_target) {
-            const diff_x = server_target.x - player.x;
-            const diff_y = server_target.y - player.y;
-            if (@abs(diff_x) > correction_threshold or @abs(diff_y) > correction_threshold) {
-                const blend = std.math.clamp(dt * 10.0, 0.0, 1.0);
-                player.x += diff_x * blend;
-                player.y += diff_y * blend;
-            }
+        udp_client.pollState();
+        if (udp_client.sampleInterpolated()) |state| {
+            player.pos = state;
         }
     }
 }
-
-const UdpClient = struct {
-    sock: std.posix.socket_t,
-    server_addr: std.net.Address,
-    recv_buf: [512]u8 = undefined,
-    last_state: ?network.StatePayload = null,
-
-    pub fn init(config: struct { server_ip: []const u8, server_port: u16 }) !UdpClient {
-        const addr = try std.net.Address.parseIp4(config.server_ip, config.server_port);
-        const sock = try std.posix.socket(addr.any.family, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
-        return .{ .sock = sock, .server_addr = addr };
-    }
-
-    pub fn deinit(self: *UdpClient) void {
-        std.posix.close(self.sock);
-    }
-
-    pub fn sendPing(self: *UdpClient) !void {
-        const payload = network.PacketPayload{ .ping = PingPayload{ .timestamp = @as(u64, @intCast(std.time.timestamp())) } };
-        const header = network.PacketHeader{
-            .msg_type = .ping,
-            .flags = .{ .reliable = true, .requires_ack = true },
-            .session_id = 0,
-            .sequence = 0,
-            .ack = 0,
-            .payload_len = @intCast(PingPayload.size()),
-        };
-        var buffer: [network.packet_header_size + PingPayload.size()]u8 = undefined;
-        const packet = network.Packet{ .header = header, .payload = payload };
-        try packet.encode(buffer[0..]);
-        const len = network.packet_header_size + PingPayload.size();
-        _ = try std.posix.sendto(self.sock, buffer[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
-    }
-
-    pub fn sendMove(self: *UdpClient, move: MovementCommand) !void {
-        const payload = network.PacketPayload{ .move = move };
-        const header = network.PacketHeader{
-            .msg_type = .move,
-            .flags = .{ .reliable = true },
-            .session_id = 0,
-            .sequence = 0,
-            .ack = 0,
-            .payload_len = @intCast(MovementCommand.size()),
-        };
-        var buffer: [network.packet_header_size + MovementCommand.size()]u8 = undefined;
-        const packet = network.Packet{ .header = header, .payload = payload };
-        try packet.encode(buffer[0..]);
-        const len = network.packet_header_size + MovementCommand.size();
-        _ = try std.posix.sendto(self.sock, buffer[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
-    }
-
-    pub fn pollState(self: *UdpClient) ?network.StatePayload {
-        var addr_storage: std.posix.sockaddr.storage = undefined;
-        var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr.storage);
-        const received = std.posix.recvfrom(
-            self.sock,
-            &self.recv_buf,
-            std.posix.MSG.DONTWAIT,
-            @ptrCast(&addr_storage),
-            &addr_len,
-        ) catch |err| {
-            if (err == error.WouldBlock) return null;
-            std.debug.print("recv error: {s}\n", .{@errorName(err)});
-            return null;
-        };
-
-        const packet = network.Packet.decode(self.recv_buf[0..received]) catch |err| {
-            std.debug.print("decode error: {s}\n", .{@errorName(err)});
-            return null;
-        };
-        switch (packet.payload) {
-            .state_update => |state| {
-                std.debug.print("server pos: {d:.2}, {d:.2}\n", .{ state.x, state.y });
-                self.last_state = state;
-                return state;
-            },
-            else => return null,
-        }
-    }
-};
 
 fn updateMinimap(mm: rl.RenderTexture2D, player: rl.Vector2, world_w: f32, world_h: f32, mm_size: i32) void {
     rl.beginTextureMode(mm);
@@ -364,25 +281,104 @@ fn updateMinimap(mm: rl.RenderTexture2D, player: rl.Vector2, world_w: f32, world
     rl.drawLine(cx, cy, @as(i32, @intFromFloat(dot.x)), @as(i32, @intFromFloat(dot.y)), rl.Color{ .r = 255, .g = 64, .b = 64, .a = 255 });
 }
 
-fn drawWorldTiles(world_w: f32, world_h: f32) void {
+fn drawWorldTiles(texture: rl.Texture2D, world_w: f32, world_h: f32) void {
     const tile_w: f32 = world_w / @as(f32, @floatFromInt(TILES_X));
     const tile_h: f32 = world_h / @as(f32, @floatFromInt(TILES_Y));
     var ty: i32 = 0;
     while (ty < TILES_Y) : (ty += 1) {
         var tx: i32 = 0;
         while (tx < TILES_X) : (tx += 1) {
-            const on = (((tx + ty) & 1) == 0);
-            const color = if (on)
-                rl.Color{ .r = 200, .g = 240, .b = 200, .a = 255 }
-            else
-                rl.Color{ .r = 160, .g = 210, .b = 160, .a = 255 };
+            // Custom layout: Water center, Rock ring, Grass outer
+            const center_x = TILES_X / 2;
+            const center_y = TILES_Y / 2;
+            const dx = tx - center_x;
+            const dy = ty - center_y;
+            const dist_sq = dx * dx + dy * dy;
 
-            const pos = rl.Vector2{
+            var terrain_idx: i32 = 0; // Default Grass
+            if (dist_sq < 16) {
+                terrain_idx = 2; // Water
+            } else if (dist_sq < 25) {
+                terrain_idx = 1; // Rock
+            }
+
+            // The provided image is 200x50 (4 tiles of 50x50).
+            const TILE_SRC_W: f32 = 50;
+            const TILE_SRC_H: f32 = 50;
+
+            const src = rl.Rectangle{
+                .x = @as(f32, @floatFromInt(terrain_idx)) * TILE_SRC_W,
+                .y = 0,
+                .width = TILE_SRC_W,
+                .height = TILE_SRC_H,
+            };
+
+            const dest = rl.Rectangle{
                 .x = @as(f32, @floatFromInt(tx)) * tile_w,
                 .y = @as(f32, @floatFromInt(ty)) * tile_h,
+                .width = tile_w,
+                .height = tile_h,
             };
-            const size = rl.Vector2{ .x = tile_w + 1.0, .y = tile_h + 1.0 };
-            rl.drawRectangleV(pos, size, color);
+
+            rl.drawTexturePro(texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
         }
     }
 }
+
+const Character = struct {
+    pos: rl.Vector2,
+    size: rl.Vector2,
+    dir: MoveDirection,
+    is_moving: bool,
+    char_texture: rl.Texture2D,
+    frame_index: usize,
+    anim_timer: f32,
+
+    const WALK_SPEED: f32 = 0.1;
+    const FRAME_WIDTH: f32 = 16;
+    const FRAME_HEIGHT: f32 = 16;
+    const Self = @This();
+
+    pub fn init(pos: rl.Vector2, size: rl.Vector2) Self {
+        return .{
+            .pos = pos,
+            .size = size,
+            .is_moving = false,
+        };
+    }
+
+    pub fn update(self: *Self, dt: f32, dir: MoveDirection, is_moving: bool) void {
+        self.is_moving = is_moving;
+        if (self.is_moving) {
+            self.dir = dir;
+            self.anim_timer += dt;
+            if (self.anim_timer >= WALK_SPEED) {
+                self.anim_timer = 0;
+                self.frame_index = (self.frame_index + 1) % 3;
+            }
+        }
+    }
+
+    pub fn draw(self: *Self) !void {
+        const row: f32 = switch (self.dir) {
+            .Up => 0,
+            .Down => 1,
+            .Right => 2,
+            .Left => 2,
+        };
+        const width: f32 = if (self.dir == .Left) -FRAME_WIDTH else FRAME_WIDTH;
+        const src = rl.Rectangle{
+            .x = FRAME_WIDTH * @as(f32, @floatFromInt(self.frame_index)),
+            .y = row * FRAME_HEIGHT,
+            .width = width,
+            .height = FRAME_HEIGHT,
+        };
+        const dest = rl.Rectangle{
+            .x = self.pos.x,
+            .y = self.pos.y,
+            .width = 32,
+            .height = 32,
+        };
+        rl.drawTexturePro(self.char_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+    }
+};

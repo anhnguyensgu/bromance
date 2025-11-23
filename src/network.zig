@@ -17,9 +17,10 @@ pub const PacketType = enum(u8) {
 pub const StatePayload = struct {
     x: f32,
     y: f32,
+    timestamp_ns: i64,
 
     pub fn size() usize {
-        return 8;
+        return 16;
     }
 
     pub fn encode(self: StatePayload, dest: []u8) ![]u8 {
@@ -27,6 +28,7 @@ pub const StatePayload = struct {
         const slice = dest[0..size()];
         std.mem.writeInt(u32, slice[0..4], @as(u32, @bitCast(self.x)), wire_endian);
         std.mem.writeInt(u32, slice[4..8], @as(u32, @bitCast(self.y)), wire_endian);
+        std.mem.writeInt(i64, slice[8..16], self.timestamp_ns, wire_endian);
         return slice;
     }
 
@@ -35,6 +37,7 @@ pub const StatePayload = struct {
         return .{
             .x = @as(f32, @bitCast(std.mem.readInt(u32, buf[0..4], wire_endian))),
             .y = @as(f32, @bitCast(std.mem.readInt(u32, buf[4..8], wire_endian))),
+            .timestamp_ns = std.mem.readInt(i64, buf[8..16], wire_endian),
         };
     }
 };
@@ -217,7 +220,8 @@ pub const Packet = struct {
 
     pub fn decode(buffer: []const u8) !Packet {
         const header = try PacketHeader.decode(buffer[0..packet_header_size]);
-        const payload_slice = buffer[packet_header_size .. packet_header_size + header.payload_len];
+        const payload_len: usize = header.payload_len;
+        const payload_slice = buffer[packet_header_size .. packet_header_size + payload_len];
         const payload = try PacketPayload.decodePayload(&header, payload_slice);
         return .{
             .header = header,
@@ -308,12 +312,13 @@ test "packet move payload round trips through PacketPayload union" {
 }
 
 test "packet state payload encodes and decodes" {
-    const payload = StatePayload{ .x = 10.5, .y = -4.25 };
+    const payload = StatePayload{ .x = 10.5, .y = -4.25, .timestamp_ns = 123 };
     var buf: [StatePayload.size()]u8 = undefined;
     const encoded = try payload.encode(&buf);
     const decoded = try StatePayload.decode(encoded);
     try std.testing.expectEqual(payload.x, decoded.x);
     try std.testing.expectEqual(payload.y, decoded.y);
+    try std.testing.expectEqual(payload.timestamp_ns, decoded.timestamp_ns);
 }
 
 fn expectHeaderRoundTrip(header: PacketHeader) !void {

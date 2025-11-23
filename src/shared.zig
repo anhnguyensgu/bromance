@@ -13,6 +13,13 @@ pub const CommandInput = union(enum) {
     movement: MovementCommand,
 };
 
+pub const TerrainType = enum(u8) {
+    Grass = 0,
+    Rock = 1,
+    Water = 2,
+    Road = 3,
+};
+
 const WorldError = error{
     IndexOutOfBounds,
     MaxPlayersReached,
