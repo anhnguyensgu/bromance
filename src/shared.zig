@@ -1,36 +1,23 @@
 const std = @import("std");
-pub const protocol_version: u32 = 1;
+const command = @import("movement/command.zig");
+const MovementCommand = command.MovementCommand;
 
-pub const TileGrid = struct {
-    tiles_x: i32,
-    tiles_y: i32,
-};
+pub const network = @import("network.zig");
 
 pub const PlayerState = struct {
     x: f32,
     y: f32,
 };
 
-pub const MinimapConfig = struct {
-    size_px: i32,
-    margin_px: i32,
-};
-
-pub const MovementCommand = struct {
-    direction: MoveDirection,
-    speed: f32,
-    delta: f32,
-};
-
-pub const MoveDirection = enum {
-    Up,
-    Down,
-    Left,
-    Right,
-};
-
 pub const CommandInput = union(enum) {
     movement: MovementCommand,
+};
+
+pub const TerrainType = enum(u8) {
+    Grass = 0,
+    Rock = 1,
+    Water = 2,
+    Road = 3,
 };
 
 const WorldError = error{
@@ -38,11 +25,33 @@ const WorldError = error{
     MaxPlayersReached,
 };
 
-pub const World = struct {
+const Map = struct {
     const Self = @This();
+
+    width: f32,
+    height: f32,
+};
+
+pub const Room = struct {
+    const Self = @This();
+
     players: []*PlayerState,
     width: f32,
     height: f32,
+
+    // //
+    // keys: []u64, // user IDs
+    // slots: []u16, // assigned room index
+    // states: []u8, // 0=EMPTY, 1=OCCUPIED, 2=TOMBSTONE
+
+    pub fn init(_: usize) Self {
+        // var players = [capacity]*PlayerState{};
+        return Self{
+            // .players = players[0..],
+            // .width = 100.0,
+            // .height = 100.0,
+        };
+    }
 
     pub fn calculatePlayerPosition(self: *Self, move: MovementCommand, idx: usize) WorldError!void {
         if (idx >= self.players.len) {
@@ -67,7 +76,7 @@ pub const World = struct {
         if (x < 0.0 or x > self.width or y < 0.0 or y > self.height) {
             return WorldError.IndexOutOfBounds;
         }
-        
+
         self.players[idx].x = x;
         self.players[idx].y = y;
     }
@@ -84,7 +93,7 @@ test "player move right" {
         .y = 0.0,
     };
     var players = [_]*PlayerState{&player};
-    var world = World{
+    var world = Room{
         .players = players[0..],
         .width = 100.0,
         .height = 100.0,
@@ -106,7 +115,7 @@ test "player move out of right boundary" {
         .y = 0.0,
     };
     var players = [_]*PlayerState{&player};
-    var world = World{
+    var world = Room{
         .players = players[0..],
         .width = 100.0,
         .height = 100.0,
