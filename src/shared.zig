@@ -32,6 +32,71 @@ const Map = struct {
     height: f32,
 };
 
+pub const World = struct {
+    pub const WIDTH: f32 = 2000;
+    pub const HEIGHT: f32 = 2000;
+    pub const TILES_X: i32 = 50;
+    pub const TILES_Y: i32 = 50;
+
+    pub fn getTileAtPosition(x: f32, y: f32) TerrainType {
+        // Clamp position to world bounds
+        const clamped_x = std.math.clamp(x, 0, WIDTH);
+        const clamped_y = std.math.clamp(y, 0, HEIGHT);
+
+        // Convert world position to tile coordinates
+        const tx: i32 = @intFromFloat((clamped_x / WIDTH) * @as(f32, @floatFromInt(TILES_X)));
+        const ty: i32 = @intFromFloat((clamped_y / HEIGHT) * @as(f32, @floatFromInt(TILES_Y)));
+
+        // Apply same distance-based logic as main.zig::drawWorldTiles
+        const center_x = TILES_X / 2;
+        const center_y = TILES_Y / 2;
+        const dx = tx - center_x;
+        const dy = ty - center_y;
+        const dist_sq = dx * dx + dy * dy;
+
+        if (dist_sq < 16) return .Water;
+        if (dist_sq < 25) return .Rock;
+        return .Grass;
+    }
+
+    pub fn isWalkable(terrain: TerrainType) bool {
+        return terrain == .Grass or terrain == .Road;
+    }
+
+    pub fn checkCollision(x: f32, y: f32, w: f32, h: f32, direction: command.MoveDirection) bool {
+        // Define hitbox corners
+        const left = x;
+        const right = x + w;
+        const top = y;
+        const bottom = y + h;
+
+        // Check points based on direction
+        switch (direction) {
+            .Up => {
+                // Check top-left and top-right
+                if (!isWalkable(getTileAtPosition(left, top)) or
+                    !isWalkable(getTileAtPosition(right, top))) return true;
+            },
+            .Down => {
+                // Check bottom-left and bottom-right
+                if (!isWalkable(getTileAtPosition(left, bottom)) or
+                    !isWalkable(getTileAtPosition(right, bottom))) return true;
+            },
+            .Left => {
+                // Check top-left and bottom-left
+                if (!isWalkable(getTileAtPosition(left, top)) or
+                    !isWalkable(getTileAtPosition(left, bottom))) return true;
+            },
+            .Right => {
+                // Check top-right and bottom-right
+                if (!isWalkable(getTileAtPosition(right, top)) or
+                    !isWalkable(getTileAtPosition(right, bottom))) return true;
+            },
+        }
+        return false;
+    }
+};
+
 pub const Room = struct {
     const Self = @This();
 

@@ -6,18 +6,15 @@ const MoveDirection = command.MoveDirection;
 const client = @import("client/udp_client.zig");
 const UdpClient = client.UdpClient;
 const applyMoveToVector = client.applyMoveToVector;
-
-// Tile grid shared by world render and minimap so visuals match
-const TILES_X: i32 = 50;
-const TILES_Y: i32 = 50;
+const shared = @import("shared.zig");
 
 pub fn main() !void {
     try runRaylib();
 }
 
 pub fn runRaylib() anyerror!void {
-    const WORLD_W: f32 = 2000;
-    const WORLD_H: f32 = 2000;
+    const WORLD_W: f32 = shared.World.WIDTH;
+    const WORLD_H: f32 = shared.World.HEIGHT;
     // Initialization
     //--------------------------------------------------------------------------------------
     const screenWidth = 800;
@@ -40,12 +37,13 @@ pub fn runRaylib() anyerror!void {
     defer rl.unloadTexture(terrain_texture);
     var player = Character{
         .pos = rl.Vector2{ .x = 350, .y = 200 },
-        .size = rl.Vector2{ .x = 50, .y = 50 },
+        .size = rl.Vector2{ .x = 32, .y = 32 },
         .is_moving = false,
         .char_texture = char_texture,
         .dir = .Up,
         .frame_index = 0,
         .anim_timer = 0,
+        .debug = true,
     };
     const speed = 200;
     var camera = rl.Camera2D{
@@ -67,30 +65,23 @@ pub fn runRaylib() anyerror!void {
 
     const move_send_interval: f32 = 0.05;
     var move_accum: f32 = 0.0;
-    var pending_move: ?MovementCommand = null;
     var udp_client = try UdpClient.init(.{ .server_ip = "127.0.0.1", .server_port = 9999 });
     defer udp_client.deinit();
     udp_client.sendPing() catch |err| std.debug.print("failed to send ping: {s}\n", .{@errorName(err)});
 
+    var pending_move: ?MovementCommand = null;
     while (!rl.windowShouldClose()) {
         const dt = rl.getFrameTime();
 
+        // Input handling - just capture the intended move
         if (rl.isKeyDown(.down)) {
-            const cmd = MovementCommand{ .direction = .Down, .speed = speed, .delta = dt };
-            applyMoveToVector(&player.pos, cmd);
-            pending_move = cmd;
+            pending_move = MovementCommand{ .direction = .Down, .speed = speed, .delta = dt };
         } else if (rl.isKeyDown(.up)) {
-            const cmd = MovementCommand{ .direction = .Up, .speed = speed, .delta = dt };
-            applyMoveToVector(&player.pos, cmd);
-            pending_move = cmd;
+            pending_move = MovementCommand{ .direction = .Up, .speed = speed, .delta = dt };
         } else if (rl.isKeyDown(.right)) {
-            const cmd = MovementCommand{ .direction = .Right, .speed = speed, .delta = dt };
-            applyMoveToVector(&player.pos, cmd);
-            pending_move = cmd;
+            pending_move = MovementCommand{ .direction = .Right, .speed = speed, .delta = dt };
         } else if (rl.isKeyDown(.left)) {
-            const cmd = MovementCommand{ .direction = .Left, .speed = speed, .delta = dt };
-            applyMoveToVector(&player.pos, cmd);
-            pending_move = cmd;
+            pending_move = MovementCommand{ .direction = .Left, .speed = speed, .delta = dt };
         } else {
             pending_move = null;
         }
@@ -101,7 +92,19 @@ pub fn runRaylib() anyerror!void {
                 udp_client.sendMove(cmd) catch |err| std.debug.print("failed to send move: {s}\n", .{@errorName(err)});
             }
         }
+
+        // Apply movement with collision detection
         if (pending_move) |cmd| {
+            const old_pos = player.pos;
+            var new_pos = old_pos;
+            applyMoveToVector(&new_pos, cmd);
+
+            // Check collision at new position using shared World logic
+            const collision = shared.World.checkCollision(new_pos.x, new_pos.y, player.size.x, player.size.y, cmd.direction);
+
+            if (!collision) {
+                player.pos = new_pos;
+            }
             player.update(dt, cmd.direction, true);
         } else {
             player.update(dt, .Down, false);
@@ -202,8 +205,14 @@ pub fn runRaylib() anyerror!void {
 
         camera.target = .init(cam_target_x, cam_target_y);
         camera.begin();
-        rl.clearBackground(.white);
-        // Draw world tiles matching the minimap pattern
+
+        // Camera follows player
+        // Calculate target position (centered on player)
+        rl.clearBackground(rl.Color.ray_white);
+
+        rl.beginMode2D(camera);
+
+        // Draw World
         drawWorldTiles(terrain_texture, WORLD_W, WORLD_H);
         try player.draw();
         camera.end();
@@ -240,57 +249,41 @@ pub fn runRaylib() anyerror!void {
     }
 }
 
-fn updateMinimap(mm: rl.RenderTexture2D, player: rl.Vector2, world_w: f32, world_h: f32, mm_size: i32) void {
-    rl.beginTextureMode(mm);
+fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f32, world_h: f32, size: f32) void {
+    rl.beginTextureMode(target);
     defer rl.endTextureMode();
 
-    // Draw tiles matching world grid, using exact integer partitioning
-    // This guarantees full coverage of the minimap texture without gaps.
-    rl.clearBackground(.light_gray);
-    var ty: i32 = 0;
-    while (ty < TILES_Y) : (ty += 1) {
-        const y0: i32 = @divTrunc(ty * mm_size, TILES_Y);
-        const y1: i32 = @divTrunc((ty + 1) * mm_size, TILES_Y);
-        const h: i32 = y1 - y0;
-        var tx: i32 = 0;
-        while (tx < TILES_X) : (tx += 1) {
-            const x0: i32 = @divTrunc(tx * mm_size, TILES_X);
-            const x1: i32 = @divTrunc((tx + 1) * mm_size, TILES_X);
-            const w: i32 = x1 - x0;
-            const on = (((tx + ty) & 1) == 0);
-            const color = if (on)
-                rl.Color{ .r = 200, .g = 240, .b = 200, .a = 255 }
-            else
-                rl.Color{ .r = 160, .g = 210, .b = 160, .a = 255 };
-            rl.drawRectangle(x0, y0, w, h, color);
-        }
-    }
+    rl.clearBackground(rl.Color.light_gray);
 
-    // Player dot (map world position to minimap pixels)
-    const px = std.math.clamp(player.x / world_w, 0.0, 1.0);
-    const py = std.math.clamp(player.y / world_h, 0.0, 1.0);
-    const dot = rl.Vector2{
-        .x = px * @as(f32, @floatFromInt(mm_size)),
-        .y = py * @as(f32, @floatFromInt(mm_size)),
-    };
-    rl.drawCircleV(dot, 5.0, .yellow);
+    // Draw simplified world representation
+    // Water center
+    const center_x = size / 2;
+    const center_y = size / 2;
+    rl.drawCircle(@intFromFloat(center_x), @intFromFloat(center_y), size * 0.15, rl.Color.blue); // Water approx
 
-    // Line from minimap center to player dot (example line drawing)
-    const cx: i32 = @divTrunc(mm_size, 2);
-    const cy: i32 = @divTrunc(mm_size, 2);
-    rl.drawLine(cx, cy, @as(i32, @intFromFloat(dot.x)), @as(i32, @intFromFloat(dot.y)), rl.Color{ .r = 255, .g = 64, .b = 64, .a = 255 });
+    // Rock ring
+    rl.drawRing(rl.Vector2{ .x = center_x, .y = center_y }, size * 0.1, size * 0.15, 0, 360, 0, rl.Color.brown); // Rock approx
+
+    // Grass outer (background is already gray, maybe draw green rect?)
+    // Actually we cleared to light gray. Let's draw green rect first?
+    // Optimization: Just draw circles.
+
+    // Draw player
+    const px = (player_pos.x / world_w) * size;
+    const py = (player_pos.y / world_h) * size;
+    rl.drawCircle(@intFromFloat(px), @intFromFloat(py), 4, rl.Color.red);
 }
 
 fn drawWorldTiles(texture: rl.Texture2D, world_w: f32, world_h: f32) void {
-    const tile_w: f32 = world_w / @as(f32, @floatFromInt(TILES_X));
-    const tile_h: f32 = world_h / @as(f32, @floatFromInt(TILES_Y));
+    const tile_w: f32 = world_w / @as(f32, @floatFromInt(shared.World.TILES_X));
+    const tile_h: f32 = world_h / @as(f32, @floatFromInt(shared.World.TILES_Y));
     var ty: i32 = 0;
-    while (ty < TILES_Y) : (ty += 1) {
+    while (ty < shared.World.TILES_Y) : (ty += 1) {
         var tx: i32 = 0;
-        while (tx < TILES_X) : (tx += 1) {
-            // Custom layout: Water center, Rock ring, Grass outer
-            const center_x = TILES_X / 2;
-            const center_y = TILES_Y / 2;
+        while (tx < shared.World.TILES_X) : (tx += 1) {
+            // Apply same distance-based logic as drawWorldTiles
+            const center_x = shared.World.TILES_X / 2;
+            const center_y = shared.World.TILES_Y / 2;
             const dx = tx - center_x;
             const dy = ty - center_y;
             const dist_sq = dx * dx + dy * dy;
@@ -302,15 +295,18 @@ fn drawWorldTiles(texture: rl.Texture2D, world_w: f32, world_h: f32) void {
                 terrain_idx = 1; // Rock
             }
 
-            // The provided image is 200x50 (4 tiles of 50x50).
-            const TILE_SRC_W: f32 = 50;
-            const TILE_SRC_H: f32 = 50;
+            // Source rect from sprite sheet (horizontal strip)
+            // 0: Grass, 1: Rock, 2: Water
+            // The sprite sheet is 200x50, with 4 tiles of 50x50.
+            // Indices: 0=Grass, 1=Rock, 2=Water, 3=Road?
+            // Let's assume the sprite sheet matches our indices.
+            const TILE_SRC_SIZE: f32 = 50;
 
             const src = rl.Rectangle{
-                .x = @as(f32, @floatFromInt(terrain_idx)) * TILE_SRC_W,
+                .x = @as(f32, @floatFromInt(terrain_idx)) * TILE_SRC_SIZE,
                 .y = 0,
-                .width = TILE_SRC_W,
-                .height = TILE_SRC_H,
+                .width = TILE_SRC_SIZE,
+                .height = TILE_SRC_SIZE,
             };
 
             const dest = rl.Rectangle{
@@ -333,6 +329,7 @@ const Character = struct {
     char_texture: rl.Texture2D,
     frame_index: usize,
     anim_timer: f32,
+    debug: bool,
 
     const WALK_SPEED: f32 = 0.1;
     const FRAME_WIDTH: f32 = 16;
@@ -376,9 +373,12 @@ const Character = struct {
         const dest = rl.Rectangle{
             .x = self.pos.x,
             .y = self.pos.y,
-            .width = 32,
-            .height = 32,
+            .width = self.size.x,
+            .height = self.size.y,
         };
         rl.drawTexturePro(self.char_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+        if (self.debug) {
+            rl.drawRectangleLines(@intFromFloat(self.pos.x), @intFromFloat(self.pos.y), @intFromFloat(self.size.x), @intFromFloat(self.size.y), .red);
+        }
     }
 };

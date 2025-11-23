@@ -6,8 +6,6 @@ const MovementCommand = @import("../movement/command.zig").MovementCommand;
 const PingPayload = @import("../ping/command.zig").PingPayload;
 const shared = @import("../shared.zig");
 const network = shared.network;
-
-const SERVER_MAX_POS: f32 = 1000.0;
 const MAX_PENDING_MOVES: usize = 32;
 const MAX_SNAPSHOTS: usize = 32;
 const INTERPOLATION_DELAY_NS: i64 = 30_000_000;
@@ -33,9 +31,15 @@ pub const UdpClient = struct {
     snapshot_count: usize = 0,
 
     pub fn init(config: struct { server_ip: []const u8, server_port: u16 }) !UdpClient {
+        const sock = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, 0);
+        errdefer std.posix.close(sock);
+
         const addr = try std.net.Address.parseIp4(config.server_ip, config.server_port);
-        const sock = try std.posix.socket(addr.any.family, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
-        return .{ .sock = sock, .server_addr = addr };
+
+        return UdpClient{
+            .sock = sock,
+            .server_addr = addr,
+        };
     }
 
     pub fn deinit(self: *UdpClient) void {
@@ -185,14 +189,28 @@ pub const UdpClient = struct {
 };
 
 pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand) void {
+    const move_amount = move.speed * move.delta;
+
+    var new_pos = pos.*;
     switch (move.direction) {
-        .Up => pos.y -= move.speed * move.delta,
-        .Down => pos.y += move.speed * move.delta,
-        .Left => pos.x -= move.speed * move.delta,
-        .Right => pos.x += move.speed * move.delta,
+        .Up => new_pos.y -= move_amount,
+        .Down => new_pos.y += move_amount,
+        .Left => new_pos.x -= move_amount,
+        .Right => new_pos.x += move_amount,
     }
-    pos.x = std.math.clamp(pos.x, 0.0, SERVER_MAX_POS);
-    pos.y = std.math.clamp(pos.y, 0.0, SERVER_MAX_POS);
+
+    // Clamp to world bounds
+    new_pos.x = std.math.clamp(new_pos.x, 0.0, shared.World.WIDTH);
+    new_pos.y = std.math.clamp(new_pos.y, 0.0, shared.World.HEIGHT);
+
+    // Check collision at new position (check leading corners)
+    const PLAYER_SIZE: f32 = 32.0; // Must match main.zig
+    const collision = shared.World.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
+
+    // Only apply movement if no collision
+    if (!collision) {
+        pos.* = new_pos;
+    }
 }
 
 fn lerp(a: f32, b: f32, t: f32) f32 {
