@@ -39,6 +39,7 @@ pub const BuildingType = enum {
     Shop,
     Farm,
     Lake,
+    Road,
 };
 
 pub const BuildingTemplate = struct {
@@ -56,6 +57,7 @@ pub const BUILDING_TEMPLATES = [_]BuildingTemplate{
     .{ .building_type = .Shop, .width_tiles = 3, .height_tiles = 2, .sprite_width = 120, .sprite_height = 80 },
     .{ .building_type = .Farm, .width_tiles = 4, .height_tiles = 3, .sprite_width = 160, .sprite_height = 120 },
     .{ .building_type = .Lake, .width_tiles = 5, .height_tiles = 4, .sprite_width = 240, .sprite_height = 200 },
+    .{ .building_type = .Road, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
 };
 
 pub fn getBuildingTemplate(building_type: BuildingType) BuildingTemplate {
@@ -74,6 +76,49 @@ pub const Building = struct {
     tile_y: i32, // Top-left tile coordinate
 };
 
+// Map configuration
+pub const MAP_BUILDINGS = [_]Building{
+    .{ .building_type = .Townhall, .tile_x = 2, .tile_y = 2 },
+    .{ .building_type = .Lake, .tile_x = 2, .tile_y = 8 },
+    // Road from Townhall (2,2) to center (25,2)
+    .{ .building_type = .Road, .tile_x = 7, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 8, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 9, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 10, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 11, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 12, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 13, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 14, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 15, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 16, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 17, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 18, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 19, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 20, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 21, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 22, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 23, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 24, .tile_y = 3 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 3 },
+    // Vertical road
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 4 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 5 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 6 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 7 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 8 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 9 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 10 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 11 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 12 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 13 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 14 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 15 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 16 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 17 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 18 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 19 },
+};
+
 pub const World = struct {
     pub const WIDTH: f32 = 2000;
     pub const HEIGHT: f32 = 2000;
@@ -88,6 +133,13 @@ pub const World = struct {
         // Convert world position to tile coordinates
         const tx: i32 = @intFromFloat((clamped_x / WIDTH) * @as(f32, @floatFromInt(TILES_X)));
         const ty: i32 = @intFromFloat((clamped_y / HEIGHT) * @as(f32, @floatFromInt(TILES_Y)));
+
+        // Check map configuration for roads
+        for (MAP_BUILDINGS) |building| {
+            if (building.building_type == .Road and building.tile_x == tx and building.tile_y == ty) {
+                return .Road;
+            }
+        }
 
         // Apply same distance-based logic as main.zig::drawWorldTiles
         const center_x = TILES_X / 2;

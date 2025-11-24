@@ -8,12 +8,6 @@ const UdpClient = client.UdpClient;
 const applyMoveToVector = client.applyMoveToVector;
 const shared = @import("shared.zig");
 
-// Map configuration - buildings defined in tile coordinates
-const MAP_BUILDINGS = [_]shared.Building{
-    .{ .building_type = .Townhall, .tile_x = 2, .tile_y = 2 }, // Top-left corner at tile (2, 2)
-    .{ .building_type = .Lake, .tile_x = 2, .tile_y = 8 }, // Top-left corner at tile (2, 2)
-};
-
 // Helper function to convert tile coordinates to world pixel coordinates
 fn tileToWorld(tile_coord: i32, world_size: f32, tiles_count: i32) f32 {
     const tile_size = world_size / @as(f32, @floatFromInt(tiles_count));
@@ -27,7 +21,10 @@ fn checkBuildingCollision(x: f32, y: f32, w: f32, h: f32) bool {
     const player_top = y;
     const player_bottom = y + h;
 
-    for (MAP_BUILDINGS) |building| {
+    for (shared.MAP_BUILDINGS) |building| {
+        // Skip roads for collision (they are walkable)
+        if (building.building_type == .Road) continue;
+
         const template = shared.getBuildingTemplate(building.building_type);
 
         // Convert building tile coordinates to world pixels
@@ -53,6 +50,64 @@ fn checkBuildingCollision(x: f32, y: f32, w: f32, h: f32) bool {
     return false;
 }
 
+fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screenWidth: i32, screenHeight: i32, world_w: f32, world_h: f32) void {
+    const view_half_w: f32 = (@as(f32, @floatFromInt(screenWidth)) * 0.5) / camera.zoom;
+    const view_half_h: f32 = (@as(f32, @floatFromInt(screenHeight)) * 0.5) / camera.zoom;
+
+    var cam_target_x: f32 = player.pos.x + player.size.x * 0.5;
+    var cam_target_y: f32 = player.pos.y + player.size.y * 0.5;
+
+    // Basic clamping to world bounds
+    if (world_w > view_half_w * 2) {
+        cam_target_x = std.math.clamp(cam_target_x, view_half_w, world_w - view_half_w);
+    } else {
+        cam_target_x = world_w * 0.5;
+    }
+    if (world_h > view_half_h * 2) {
+        cam_target_y = std.math.clamp(cam_target_y, view_half_h, world_h - view_half_h);
+    } else {
+        cam_target_y = world_h * 0.5;
+    }
+
+    camera.target = .init(cam_target_x, cam_target_y);
+}
+
+fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, terrain_texture: rl.Texture2D, world_w: f32, world_h: f32) void {
+    // Draw all buildings from map configuration
+    for (shared.MAP_BUILDINGS) |building| {
+        const template = shared.getBuildingTemplate(building.building_type);
+
+        // Convert tile coordinates to world pixels
+        const building_x = tileToWorld(building.tile_x, world_w, shared.World.TILES_X);
+        const building_y = tileToWorld(building.tile_y, world_h, shared.World.TILES_Y);
+
+        switch (building.building_type) {
+            .Townhall => {
+                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
+                const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(townhall_texture.width), .height = @floatFromInt(townhall_texture.height) };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
+                rl.drawTexturePro(townhall_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+            },
+            .Lake => {
+                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
+                const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(lake_texture.width), .height = @floatFromInt(lake_texture.height) };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
+                rl.drawTexturePro(lake_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+            },
+            .Road => {
+                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
+                const TILE_SRC_SIZE: f32 = 50;
+                const road_idx: f32 = 3; // Index 3 is Road
+
+                const building_source = rl.Rectangle{ .x = road_idx * TILE_SRC_SIZE, .y = 0, .width = TILE_SRC_SIZE, .height = TILE_SRC_SIZE };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
+                rl.drawTexturePro(terrain_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+            },
+            else => {},
+        }
+    }
+}
+
 pub fn main() !void {
     try runRaylib();
 }
@@ -65,7 +120,7 @@ pub fn runRaylib() anyerror!void {
     const screenWidth = 800;
     const screenHeight = 450;
 
-    rl.initWindow(screenWidth, screenHeight, "raylib-zig [core] example - basic window");
+    rl.initWindow(screenWidth, screenHeight, "Bromance");
     defer rl.closeWindow(); // Close window and OpenGL context
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
@@ -109,7 +164,7 @@ pub fn runRaylib() anyerror!void {
         .zoom = 1,
     };
 
-    // Minimap
+    // // Minimap
     const MINIMAP_SIZE: i32 = 180;
     const UI_MARGIN_PX: i32 = 32; // keep minimap a bit away from edges
     const MINIMAP_POS = rl.Vector2{
@@ -141,6 +196,7 @@ pub fn runRaylib() anyerror!void {
         } else {
             pending_move = null;
         }
+
         move_accum += dt;
         if (move_accum >= move_send_interval) {
             move_accum = 0;
@@ -175,168 +231,40 @@ pub fn runRaylib() anyerror!void {
         if (player.pos.x > WORLD_W - player.size.x) player.pos.x = WORLD_W - player.size.x;
         if (player.pos.y > WORLD_H - player.size.y) player.pos.y = WORLD_H - player.size.y;
 
-        // Update minimap texture
-        updateMinimap(minimap, player.pos, WORLD_W, WORLD_H, MINIMAP_SIZE);
-
         rl.beginDrawing();
         defer rl.endDrawing();
 
-        // World render (camera space) with camera clamped to world bounds,
-        // reserving the minimap area (plus a little extra) so the player
-        // never goes under it.
-        const view_half_w: f32 = (@as(f32, @floatFromInt(screenWidth)) * 0.5) / camera.zoom;
-        const view_half_h: f32 = (@as(f32, @floatFromInt(screenHeight)) * 0.5) / camera.zoom;
-
-        var cam_target_x: f32 = player.pos.x + player.size.x * 0.5;
-        var cam_target_y: f32 = player.pos.y + player.size.y * 0.5;
-
-        // Convert minimap occupied pixels into world-units margins on the top/left.
-        // Reserve: minimap size + UI margin + a small player-safe pad, so the world
-        // renders lower/right enough that the player won't slide under the minimap.
-        const PLAYER_SAFE_PX: f32 = 8.0; // extra padding to keep player comfortably away
-        const reserved_left_px: f32 =
-            MINIMAP_POS.x +
-            @as(f32, @floatFromInt(MINIMAP_SIZE)) +
-            @as(f32, @floatFromInt(UI_MARGIN_PX)) +
-            PLAYER_SAFE_PX;
-        // Keep extra vertical headroom so the minimap feels clearly above
-        // the world boundary: add an extra UI margin to the reserved band.
-        const reserved_top_px: f32 =
-            MINIMAP_POS.y +
-            @as(f32, @floatFromInt(MINIMAP_SIZE)) +
-            (@as(f32, @floatFromInt(UI_MARGIN_PX)) * 2) +
-            PLAYER_SAFE_PX;
-        const min_bound_x: f32 = ((@as(f32, @floatFromInt(screenWidth)) * 0.5) - reserved_left_px) / camera.zoom;
-        const min_bound_y: f32 = ((@as(f32, @floatFromInt(screenHeight)) * 0.5) - reserved_top_px) / camera.zoom;
-        const min_x = @max(min_bound_x, 0.0);
-        const min_y = @max(min_bound_y, 0.0);
-
-        if (WORLD_W > view_half_w * 2) {
-            cam_target_x = std.math.clamp(cam_target_x, min_x, WORLD_W - view_half_w);
-        } else {
-            cam_target_x = WORLD_W * 0.5;
-        }
-        if (WORLD_H > view_half_h * 2) {
-            cam_target_y = std.math.clamp(cam_target_y, min_y, WORLD_H - view_half_h);
-        } else {
-            cam_target_y = WORLD_H * 0.5;
-        }
-
-        // Avoid covering player with a fixed minimap by shifting camera target
-        // so the player's projected screen position stays outside the minimap rect
-        const UI_SAFE_MARGIN: f32 = 8.0;
-        const player_center_x: f32 = player.pos.x + player.size.x * 0.5;
-        const player_center_y: f32 = player.pos.y + player.size.y * 0.5;
-
-        // Compute player's screen position for the current (clamped) camera
-        var px_screen: f32 = (player_center_x - cam_target_x) * camera.zoom + camera.offset.x;
-        var py_screen: f32 = (player_center_y - cam_target_y) * camera.zoom + camera.offset.y;
-
-        const mm_left: f32 = MINIMAP_POS.x;
-        const mm_top: f32 = MINIMAP_POS.y;
-        const mm_right: f32 = mm_left + @as(f32, @floatFromInt(MINIMAP_SIZE));
-        const mm_bottom: f32 = mm_top + @as(f32, @floatFromInt(MINIMAP_SIZE));
-
-        const inside_h = (px_screen >= mm_left - UI_SAFE_MARGIN) and (px_screen <= mm_right + UI_SAFE_MARGIN);
-        const inside_v = (py_screen >= mm_top - UI_SAFE_MARGIN) and (py_screen <= mm_bottom + UI_SAFE_MARGIN);
-
-        if (inside_h) {
-            const desired_px = mm_right + UI_SAFE_MARGIN;
-            cam_target_x = player_center_x - (desired_px - camera.offset.x) / camera.zoom;
-            // re-clamp to world bounds
-            if (WORLD_W > view_half_w * 2) {
-                cam_target_x = std.math.clamp(cam_target_x, view_half_w, WORLD_W - view_half_w);
-            } else {
-                cam_target_x = WORLD_W * 0.5;
-            }
-            px_screen = (player_center_x - cam_target_x) * camera.zoom + camera.offset.x;
-        }
-        if (inside_v) {
-            const desired_py = mm_bottom + UI_SAFE_MARGIN;
-            cam_target_y = player_center_y - (desired_py - camera.offset.y) / camera.zoom;
-            if (WORLD_H > view_half_h * 2) {
-                cam_target_y = std.math.clamp(cam_target_y, view_half_h, WORLD_H - view_half_h);
-            } else {
-                cam_target_y = WORLD_H * 0.5;
-            }
-            py_screen = (player_center_y - cam_target_y) * camera.zoom + camera.offset.y;
-        }
-
-        camera.target = .init(cam_target_x, cam_target_y);
-        camera.begin();
-
         // Camera follows player
-        // Calculate target position (centered on player)
-        rl.clearBackground(rl.Color.ray_white);
+        updateCameraFocus(&camera, player, screenWidth, screenHeight, WORLD_W, WORLD_H);
 
+        rl.clearBackground(rl.Color.ray_white);
         rl.beginMode2D(camera);
 
         // Draw World
         drawWorldTiles(terrain_texture, WORLD_W, WORLD_H);
 
-        // // Draw lake in center of map
-        // // Lake should cover the water/rock tile area (roughly 8-10 tiles diameter)
-        // const lake_size_tiles: f32 = 10.0; // 10x10 tiles
-        // const lake_pixel_size = (WORLD_W / @as(f32, @floatFromInt(shared.World.TILES_X))) * lake_size_tiles;
-        // const lake_center_x = WORLD_W / 2.0;
-        // const lake_center_y = WORLD_H / 2.0;
-        // const lake_x = lake_center_x - (lake_pixel_size / 2.0);
-        // const lake_y = lake_center_y - (lake_pixel_size / 2.0);
-
-        // const lake_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(lake_texture.width), .height = @floatFromInt(lake_texture.height) };
-        // const lake_dest = rl.Rectangle{ .x = lake_x, .y = lake_y, .width = lake_pixel_size, .height = lake_pixel_size };
-        // rl.drawTexturePro(lake_texture, lake_source, lake_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color.white);
-
         // Draw all buildings from map configuration
-        for (MAP_BUILDINGS) |building| {
-            const template = shared.getBuildingTemplate(building.building_type);
-
-            // Convert tile coordinates to world pixels
-            const building_x = tileToWorld(building.tile_x, WORLD_W, shared.World.TILES_X);
-            const building_y = tileToWorld(building.tile_y, WORLD_H, shared.World.TILES_Y);
-
-            // Only render townhall for now (we only have townhall texture)
-            if (building.building_type == .Townhall) {
-                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
-                const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(townhall_texture.width), .height = @floatFromInt(townhall_texture.height) };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
-                rl.drawTexturePro(townhall_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color.white);
-            } else if (building.building_type == .Lake) {
-                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
-                const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(lake_texture.width), .height = @floatFromInt(lake_texture.height) };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
-                rl.drawTexturePro(lake_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color.white);
-            }
-        }
+        drawConstruction(townhall_texture, lake_texture, terrain_texture, WORLD_W, WORLD_H);
 
         try player.draw();
         camera.end();
 
         // UI: draw the minimap (note the source height is flipped for render textures)
-        const src = rl.Rectangle{
-            .x = 0,
-            .y = 0,
-            .width = @as(f32, @floatFromInt(minimap.texture.width)),
-            .height = -@as(f32, @floatFromInt(minimap.texture.height)),
-        };
-        const dst = rl.Rectangle{
-            .x = MINIMAP_POS.x,
-            .y = MINIMAP_POS.y,
-            .width = @as(f32, @floatFromInt(MINIMAP_SIZE)),
-            .height = @as(f32, @floatFromInt(MINIMAP_SIZE)),
-        };
-        rl.drawTexturePro(minimap.texture, src, dst, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
-        rl.drawRectangleLines(@intFromFloat(dst.x), @intFromFloat(dst.y), MINIMAP_SIZE, MINIMAP_SIZE, .black);
+        updateMinimap(minimap, player.pos, WORLD_W, WORLD_H, MINIMAP_SIZE, MINIMAP_POS);
+
         var buf: [128]u8 = undefined;
         const pos_text = std.fmt.bufPrintZ(&buf, "Player: ({:.0}, {:.0})", .{ player.pos.x, player.pos.y }) catch "";
         rl.drawText(
             pos_text,
-            MINIMAP_SIZE + @as(i32, @intFromFloat(MINIMAP_POS.x)) + 10,
-            @as(i32, @intFromFloat(MINIMAP_POS.y)),
+            MINIMAP_POS.x + 10,
+            10,
             20,
             .dark_gray,
         );
 
+        rl.drawFPS(10, 10);
+
+        //sending to server
         udp_client.pollState();
         if (udp_client.sampleInterpolated()) |state| {
             player.pos = state;
@@ -344,45 +272,65 @@ pub fn runRaylib() anyerror!void {
     }
 }
 
-fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f32, world_h: f32, size: f32) void {
-    rl.beginTextureMode(target);
-    defer rl.endTextureMode();
+fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f32, world_h: f32, size: f32, MINIMAP_POS: rl.Vector2) void {
+    // 1. Update the minimap texture content (Inside a block!)
+    {
+        rl.beginTextureMode(target);
+        defer rl.endTextureMode();
 
-    rl.clearBackground(rl.Color.light_gray);
+        rl.clearBackground(rl.Color.light_gray);
 
-    // Draw buildings on minimap
-    for (MAP_BUILDINGS) |building| {
-        const template = shared.getBuildingTemplate(building.building_type);
+        // Draw buildings on minimap
+        for (shared.MAP_BUILDINGS) |building| {
+            const template = shared.getBuildingTemplate(building.building_type);
 
-        // Convert building tile coordinates to world pixels
-        const building_x = tileToWorld(building.tile_x, world_w, shared.World.TILES_X);
-        const building_y = tileToWorld(building.tile_y, world_h, shared.World.TILES_Y);
-        const building_w = tileToWorld(template.width_tiles, world_w, shared.World.TILES_X);
-        const building_h = tileToWorld(template.height_tiles, world_h, shared.World.TILES_Y);
+            // Convert building tile coordinates to world pixels
+            const building_x = tileToWorld(building.tile_x, world_w, shared.World.TILES_X);
+            const building_y = tileToWorld(building.tile_y, world_h, shared.World.TILES_Y);
+            const building_w = tileToWorld(template.width_tiles, world_w, shared.World.TILES_X);
+            const building_h = tileToWorld(template.height_tiles, world_h, shared.World.TILES_Y);
 
-        // Convert to minimap coordinates
-        const minimap_x = (building_x / world_w) * size;
-        const minimap_y = (building_y / world_h) * size;
-        const minimap_w = (building_w / world_w) * size;
-        const minimap_h = (building_h / world_h) * size;
+            // Convert to minimap coordinates
+            const minimap_x = (building_x / world_w) * size;
+            const minimap_y = (building_y / world_h) * size;
+            const minimap_w = (building_w / world_w) * size;
+            const minimap_h = (building_h / world_h) * size;
 
-        // Choose color based on building type
-        const building_color = switch (building.building_type) {
-            .Townhall => rl.Color.gold,
-            .House => rl.Color.orange,
-            .Shop => rl.Color.purple,
-            .Farm => rl.Color.green,
-            .Lake => rl.Color.blue,
-        };
+            // Choose color based on building type
+            const building_color = switch (building.building_type) {
+                .Townhall => rl.Color.gold,
+                .House => rl.Color.orange,
+                .Shop => rl.Color.purple,
+                .Farm => rl.Color.green,
+                .Lake => rl.Color.blue,
+                .Road => rl.Color.brown,
+            };
 
-        // Draw building as a small rectangle
-        rl.drawRectangle(@intFromFloat(minimap_x), @intFromFloat(minimap_y), @intFromFloat(minimap_w), @intFromFloat(minimap_h), building_color);
-    }
+            // Draw building as a small rectangle
+            rl.drawRectangle(@intFromFloat(minimap_x), @intFromFloat(minimap_y), @intFromFloat(minimap_w), @intFromFloat(minimap_h), building_color);
+        }
 
-    // Draw player
-    const px = (player_pos.x / world_w) * size;
-    const py = (player_pos.y / world_h) * size;
-    rl.drawCircle(@intFromFloat(px), @intFromFloat(py), 4, rl.Color.red);
+        // Draw player
+        const px = (player_pos.x / world_w) * size;
+        const py = (player_pos.y / world_h) * size;
+        rl.drawCircle(@intFromFloat(px), @intFromFloat(py), 4, rl.Color.red);
+    } // <--- Texture mode ends here
+
+    // 2. Draw the updated texture to the screen
+    const src = rl.Rectangle{
+        .x = 0,
+        .y = 0,
+        .width = @as(f32, @floatFromInt(target.texture.width)),
+        .height = -@as(f32, @floatFromInt(target.texture.height)),
+    };
+    const dst = rl.Rectangle{
+        .x = MINIMAP_POS.x,
+        .y = MINIMAP_POS.y,
+        .width = @as(f32, size),
+        .height = @as(f32, size),
+    };
+    rl.drawTexturePro(target.texture, src, dst, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+    rl.drawRectangleLines(@intFromFloat(dst.x), @intFromFloat(dst.y), @intFromFloat(size), @intFromFloat(size), .black);
 }
 
 fn drawWorldTiles(texture: rl.Texture2D, world_w: f32, world_h: f32) void {
