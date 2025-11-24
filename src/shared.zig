@@ -32,6 +32,48 @@ const Map = struct {
     height: f32,
 };
 
+// Building system
+pub const BuildingType = enum {
+    Townhall,
+    House,
+    Shop,
+    Farm,
+    Lake,
+};
+
+pub const BuildingTemplate = struct {
+    building_type: BuildingType,
+    width_tiles: i32, // Width in tiles
+    height_tiles: i32, // Height in tiles
+    sprite_width: f32, // Width in pixels for rendering
+    sprite_height: f32, // Height in pixels for rendering
+};
+
+// Building templates define the properties of each building type
+pub const BUILDING_TEMPLATES = [_]BuildingTemplate{
+    .{ .building_type = .Townhall, .width_tiles = 5, .height_tiles = 4, .sprite_width = 192, .sprite_height = 170 },
+    .{ .building_type = .House, .width_tiles = 2, .height_tiles = 2, .sprite_width = 80, .sprite_height = 80 },
+    .{ .building_type = .Shop, .width_tiles = 3, .height_tiles = 2, .sprite_width = 120, .sprite_height = 80 },
+    .{ .building_type = .Farm, .width_tiles = 4, .height_tiles = 3, .sprite_width = 160, .sprite_height = 120 },
+    .{ .building_type = .Lake, .width_tiles = 5, .height_tiles = 4, .sprite_width = 240, .sprite_height = 200 },
+};
+
+pub fn getBuildingTemplate(building_type: BuildingType) BuildingTemplate {
+    for (BUILDING_TEMPLATES) |template| {
+        if (template.building_type == building_type) {
+            return template;
+        }
+    }
+    return BUILDING_TEMPLATES[0]; // Default to Townhall
+}
+
+// Building instance on the map
+pub const Building = struct {
+    building_type: BuildingType,
+    tile_x: i32, // Top-left tile coordinate
+    tile_y: i32, // Top-left tile coordinate
+};
+
 pub const World = struct {
     pub const WIDTH: f32 = 2000;
     pub const HEIGHT: f32 = 2000;

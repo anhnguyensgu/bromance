@@ -8,6 +8,51 @@ const UdpClient = client.UdpClient;
 const applyMoveToVector = client.applyMoveToVector;
 const shared = @import("shared.zig");
 
+// Map configuration - buildings defined in tile coordinates
+const MAP_BUILDINGS = [_]shared.Building{
+    .{ .building_type = .Townhall, .tile_x = 2, .tile_y = 2 }, // Top-left corner at tile (2, 2)
+    .{ .building_type = .Lake, .tile_x = 2, .tile_y = 8 }, // Top-left corner at tile (2, 2)
+};
+
+// Helper function to convert tile coordinates to world pixel coordinates
+fn tileToWorld(tile_coord: i32, world_size: f32, tiles_count: i32) f32 {
+    const tile_size = world_size / @as(f32, @floatFromInt(tiles_count));
+    return @as(f32, @floatFromInt(tile_coord)) * tile_size;
+}
+
+// Check if a position collides with any building on the map
+fn checkBuildingCollision(x: f32, y: f32, w: f32, h: f32) bool {
+    const player_left = x;
+    const player_right = x + w;
+    const player_top = y;
+    const player_bottom = y + h;
+
+    for (MAP_BUILDINGS) |building| {
+        const template = shared.getBuildingTemplate(building.building_type);
+
+        // Convert building tile coordinates to world pixels
+        const building_x = tileToWorld(building.tile_x, shared.World.WIDTH, shared.World.TILES_X);
+        const building_y = tileToWorld(building.tile_y, shared.World.HEIGHT, shared.World.TILES_Y);
+        const building_w = tileToWorld(template.width_tiles, shared.World.WIDTH, shared.World.TILES_X);
+        const building_h = tileToWorld(template.height_tiles, shared.World.HEIGHT, shared.World.TILES_Y);
+
+        const building_left = building_x;
+        const building_right = building_x + building_w;
+        const building_top = building_y;
+        const building_bottom = building_y + building_h;
+
+        // AABB collision detection
+        const overlaps_x = player_right > building_left and player_left < building_right;
+        const overlaps_y = player_bottom > building_top and player_top < building_bottom;
+
+        if (overlaps_x and overlaps_y) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 pub fn main() !void {
     try runRaylib();
 }
@@ -35,6 +80,17 @@ pub fn runRaylib() anyerror!void {
     defer rl.unloadImage(terrain_img);
     const terrain_texture = try rl.loadTextureFromImage(terrain_img);
     defer rl.unloadTexture(terrain_texture);
+
+    const townhall_img = try rl.loadImage("assets/townhall_medium.png");
+    defer rl.unloadImage(townhall_img);
+    const townhall_texture = try rl.loadTextureFromImage(townhall_img);
+    defer rl.unloadTexture(townhall_texture);
+
+    const lake_img = try rl.loadImage("assets/lake_small.png");
+    defer rl.unloadImage(lake_img);
+    const lake_texture = try rl.loadTextureFromImage(lake_img);
+    defer rl.unloadTexture(lake_texture);
+
     var player = Character{
         .pos = rl.Vector2{ .x = 350, .y = 200 },
         .size = rl.Vector2{ .x = 32, .y = 32 },
@@ -99,10 +155,13 @@ pub fn runRaylib() anyerror!void {
             var new_pos = old_pos;
             applyMoveToVector(&new_pos, cmd);
 
-            // Check collision at new position using shared World logic
-            const collision = shared.World.checkCollision(new_pos.x, new_pos.y, player.size.x, player.size.y, cmd.direction);
+            // Check terrain collision using shared World logic
+            const terrain_collision = shared.World.checkCollision(new_pos.x, new_pos.y, player.size.x, player.size.y, cmd.direction);
 
-            if (!collision) {
+            // Check building collision
+            const building_collision = checkBuildingCollision(new_pos.x, new_pos.y, player.size.x, player.size.y);
+
+            if (!terrain_collision and !building_collision) {
                 player.pos = new_pos;
             }
             player.update(dt, cmd.direction, true);
@@ -214,6 +273,42 @@ pub fn runRaylib() anyerror!void {
 
         // Draw World
         drawWorldTiles(terrain_texture, WORLD_W, WORLD_H);
+
+        // // Draw lake in center of map
+        // // Lake should cover the water/rock tile area (roughly 8-10 tiles diameter)
+        // const lake_size_tiles: f32 = 10.0; // 10x10 tiles
+        // const lake_pixel_size = (WORLD_W / @as(f32, @floatFromInt(shared.World.TILES_X))) * lake_size_tiles;
+        // const lake_center_x = WORLD_W / 2.0;
+        // const lake_center_y = WORLD_H / 2.0;
+        // const lake_x = lake_center_x - (lake_pixel_size / 2.0);
+        // const lake_y = lake_center_y - (lake_pixel_size / 2.0);
+
+        // const lake_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(lake_texture.width), .height = @floatFromInt(lake_texture.height) };
+        // const lake_dest = rl.Rectangle{ .x = lake_x, .y = lake_y, .width = lake_pixel_size, .height = lake_pixel_size };
+        // rl.drawTexturePro(lake_texture, lake_source, lake_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color.white);
+
+        // Draw all buildings from map configuration
+        for (MAP_BUILDINGS) |building| {
+            const template = shared.getBuildingTemplate(building.building_type);
+
+            // Convert tile coordinates to world pixels
+            const building_x = tileToWorld(building.tile_x, WORLD_W, shared.World.TILES_X);
+            const building_y = tileToWorld(building.tile_y, WORLD_H, shared.World.TILES_Y);
+
+            // Only render townhall for now (we only have townhall texture)
+            if (building.building_type == .Townhall) {
+                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
+                const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(townhall_texture.width), .height = @floatFromInt(townhall_texture.height) };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
+                rl.drawTexturePro(townhall_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color.white);
+            } else if (building.building_type == .Lake) {
+                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
+                const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(lake_texture.width), .height = @floatFromInt(lake_texture.height) };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
+                rl.drawTexturePro(lake_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color.white);
+            }
+        }
+
         try player.draw();
         camera.end();
 
@@ -255,18 +350,34 @@ fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f3
 
     rl.clearBackground(rl.Color.light_gray);
 
-    // Draw simplified world representation
-    // Water center
-    const center_x = size / 2;
-    const center_y = size / 2;
-    rl.drawCircle(@intFromFloat(center_x), @intFromFloat(center_y), size * 0.15, rl.Color.blue); // Water approx
+    // Draw buildings on minimap
+    for (MAP_BUILDINGS) |building| {
+        const template = shared.getBuildingTemplate(building.building_type);
 
-    // Rock ring
-    rl.drawRing(rl.Vector2{ .x = center_x, .y = center_y }, size * 0.1, size * 0.15, 0, 360, 0, rl.Color.brown); // Rock approx
+        // Convert building tile coordinates to world pixels
+        const building_x = tileToWorld(building.tile_x, world_w, shared.World.TILES_X);
+        const building_y = tileToWorld(building.tile_y, world_h, shared.World.TILES_Y);
+        const building_w = tileToWorld(template.width_tiles, world_w, shared.World.TILES_X);
+        const building_h = tileToWorld(template.height_tiles, world_h, shared.World.TILES_Y);
 
-    // Grass outer (background is already gray, maybe draw green rect?)
-    // Actually we cleared to light gray. Let's draw green rect first?
-    // Optimization: Just draw circles.
+        // Convert to minimap coordinates
+        const minimap_x = (building_x / world_w) * size;
+        const minimap_y = (building_y / world_h) * size;
+        const minimap_w = (building_w / world_w) * size;
+        const minimap_h = (building_h / world_h) * size;
+
+        // Choose color based on building type
+        const building_color = switch (building.building_type) {
+            .Townhall => rl.Color.gold,
+            .House => rl.Color.orange,
+            .Shop => rl.Color.purple,
+            .Farm => rl.Color.green,
+            .Lake => rl.Color.blue,
+        };
+
+        // Draw building as a small rectangle
+        rl.drawRectangle(@intFromFloat(minimap_x), @intFromFloat(minimap_y), @intFromFloat(minimap_w), @intFromFloat(minimap_h), building_color);
+    }
 
     // Draw player
     const px = (player_pos.x / world_w) * size;
@@ -281,19 +392,7 @@ fn drawWorldTiles(texture: rl.Texture2D, world_w: f32, world_h: f32) void {
     while (ty < shared.World.TILES_Y) : (ty += 1) {
         var tx: i32 = 0;
         while (tx < shared.World.TILES_X) : (tx += 1) {
-            // Apply same distance-based logic as drawWorldTiles
-            const center_x = shared.World.TILES_X / 2;
-            const center_y = shared.World.TILES_Y / 2;
-            const dx = tx - center_x;
-            const dy = ty - center_y;
-            const dist_sq = dx * dx + dy * dy;
-
-            var terrain_idx: i32 = 0; // Default Grass
-            if (dist_sq < 16) {
-                terrain_idx = 2; // Water
-            } else if (dist_sq < 25) {
-                terrain_idx = 1; // Rock
-            }
+            const terrain_idx: i32 = 0; // Default Grass
 
             // Source rect from sprite sheet (horizontal strip)
             // 0: Grass, 1: Rock, 2: Water
