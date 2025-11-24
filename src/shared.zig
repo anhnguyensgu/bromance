@@ -42,81 +42,58 @@ pub const BuildingType = enum {
     Road,
 };
 
-pub const BuildingTemplate = struct {
-    building_type: BuildingType,
-    width_tiles: i32, // Width in tiles
-    height_tiles: i32, // Height in tiles
-    sprite_width: f32, // Width in pixels for rendering
-    sprite_height: f32, // Height in pixels for rendering
-};
-
-// Building templates define the properties of each building type
-pub const BUILDING_TEMPLATES = [_]BuildingTemplate{
-    .{ .building_type = .Townhall, .width_tiles = 5, .height_tiles = 4, .sprite_width = 192, .sprite_height = 170 },
-    .{ .building_type = .House, .width_tiles = 2, .height_tiles = 2, .sprite_width = 80, .sprite_height = 80 },
-    .{ .building_type = .Shop, .width_tiles = 3, .height_tiles = 2, .sprite_width = 120, .sprite_height = 80 },
-    .{ .building_type = .Farm, .width_tiles = 4, .height_tiles = 3, .sprite_width = 160, .sprite_height = 120 },
-    .{ .building_type = .Lake, .width_tiles = 5, .height_tiles = 4, .sprite_width = 240, .sprite_height = 200 },
-    .{ .building_type = .Road, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
-};
-
-pub fn getBuildingTemplate(building_type: BuildingType) BuildingTemplate {
-    for (BUILDING_TEMPLATES) |template| {
-        if (template.building_type == building_type) {
-            return template;
-        }
-    }
-    return BUILDING_TEMPLATES[0]; // Default to Townhall
-}
-
-// Building instance on the map
+// Building instance on the map - self-contained with all properties
 pub const Building = struct {
     building_type: BuildingType,
-    tile_x: i32, // Top-left tile coordinate
-    tile_y: i32, // Top-left tile coordinate
+    tile_x: i32,
+    tile_y: i32,
+    width_tiles: i32,
+    height_tiles: i32,
+    sprite_width: f32,
+    sprite_height: f32,
 };
 
-// Map configuration
+// Map configuration - now with complete building data
 pub const MAP_BUILDINGS = [_]Building{
-    .{ .building_type = .Townhall, .tile_x = 2, .tile_y = 2 },
-    .{ .building_type = .Lake, .tile_x = 2, .tile_y = 8 },
-    // Road from Townhall (2,2) to center (25,2)
-    .{ .building_type = .Road, .tile_x = 7, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 8, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 9, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 10, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 11, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 12, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 13, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 14, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 15, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 16, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 17, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 18, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 19, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 20, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 21, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 22, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 23, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 24, .tile_y = 3 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 3 },
+    .{ .building_type = .Townhall, .tile_x = 2, .tile_y = 2, .width_tiles = 5, .height_tiles = 4, .sprite_width = 192, .sprite_height = 170 },
+    .{ .building_type = .Lake, .tile_x = 2, .tile_y = 8, .width_tiles = 5, .height_tiles = 4, .sprite_width = 240, .sprite_height = 200 },
+    // Roads - 1x1 tiles, 50x50 sprite
+    .{ .building_type = .Road, .tile_x = 7, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 8, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 9, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 10, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 11, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 12, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 13, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 14, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 15, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 16, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 17, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 18, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 19, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 20, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 21, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 22, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 23, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 24, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 3, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
     // Vertical road
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 4 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 5 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 6 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 7 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 8 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 9 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 10 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 11 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 12 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 13 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 14 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 15 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 16 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 17 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 18 },
-    .{ .building_type = .Road, .tile_x = 25, .tile_y = 19 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 4, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 5, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 6, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 7, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 8, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 9, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 10, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 11, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 12, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 13, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 14, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 15, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 16, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 17, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 18, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
+    .{ .building_type = .Road, .tile_x = 25, .tile_y = 19, .width_tiles = 1, .height_tiles = 1, .sprite_width = 50, .sprite_height = 50 },
 };
 
 pub const World = struct {

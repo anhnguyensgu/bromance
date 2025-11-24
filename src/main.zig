@@ -25,13 +25,11 @@ fn checkBuildingCollision(x: f32, y: f32, w: f32, h: f32) bool {
         // Skip roads for collision (they are walkable)
         if (building.building_type == .Road) continue;
 
-        const template = shared.getBuildingTemplate(building.building_type);
-
         // Convert building tile coordinates to world pixels
         const building_x = tileToWorld(building.tile_x, shared.World.WIDTH, shared.World.TILES_X);
         const building_y = tileToWorld(building.tile_y, shared.World.HEIGHT, shared.World.TILES_Y);
-        const building_w = tileToWorld(template.width_tiles, shared.World.WIDTH, shared.World.TILES_X);
-        const building_h = tileToWorld(template.height_tiles, shared.World.HEIGHT, shared.World.TILES_Y);
+        const building_w = tileToWorld(building.width_tiles, shared.World.WIDTH, shared.World.TILES_X);
+        const building_h = tileToWorld(building.height_tiles, shared.World.HEIGHT, shared.World.TILES_Y);
 
         const building_left = building_x;
         const building_right = building_x + building_w;
@@ -50,9 +48,9 @@ fn checkBuildingCollision(x: f32, y: f32, w: f32, h: f32) bool {
     return false;
 }
 
-fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screenWidth: i32, screenHeight: i32, world_w: f32, world_h: f32) void {
-    const view_half_w: f32 = (@as(f32, @floatFromInt(screenWidth)) * 0.5) / camera.zoom;
-    const view_half_h: f32 = (@as(f32, @floatFromInt(screenHeight)) * 0.5) / camera.zoom;
+fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world_w: f32, world_h: f32) void {
+    const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;
+    const view_half_h: f32 = (@as(f32, @floatFromInt(screen_height)) * 0.5) / camera.zoom;
 
     var cam_target_x: f32 = player.pos.x + player.size.x * 0.5;
     var cam_target_y: f32 = player.pos.y + player.size.y * 0.5;
@@ -75,8 +73,6 @@ fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screenWidth: i32, 
 fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, terrain_texture: rl.Texture2D, world_w: f32, world_h: f32) void {
     // Draw all buildings from map configuration
     for (shared.MAP_BUILDINGS) |building| {
-        const template = shared.getBuildingTemplate(building.building_type);
-
         // Convert tile coordinates to world pixels
         const building_x = tileToWorld(building.tile_x, world_w, shared.World.TILES_X);
         const building_y = tileToWorld(building.tile_y, world_h, shared.World.TILES_Y);
@@ -85,13 +81,13 @@ fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, 
             .Townhall => {
                 const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
                 const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(townhall_texture.width), .height = @floatFromInt(townhall_texture.height) };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
                 rl.drawTexturePro(townhall_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
             },
             .Lake => {
                 const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
                 const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(lake_texture.width), .height = @floatFromInt(lake_texture.height) };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
                 rl.drawTexturePro(lake_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
             },
             .Road => {
@@ -100,7 +96,7 @@ fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, 
                 const road_idx: f32 = 3; // Index 3 is Road
 
                 const building_source = rl.Rectangle{ .x = road_idx * TILE_SRC_SIZE, .y = 0, .width = TILE_SRC_SIZE, .height = TILE_SRC_SIZE };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = template.sprite_width, .height = template.sprite_height };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
                 rl.drawTexturePro(terrain_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
             },
             else => {},
@@ -112,15 +108,71 @@ pub fn main() !void {
     try runRaylib();
 }
 
+var map_opened: bool = false;
+fn toggle_map() void {
+    map_opened = !map_opened;
+}
+
+fn drawMenu(screen_width: i32, menu_height: i32, comptime menu_items: []const MenuItem, active_item: *?usize) void {
+    const menu_height_f = @as(f32, @floatFromInt(menu_height));
+
+    rl.drawRectangle(0, 0, screen_width, menu_height, rl.Color{ .r = 30, .g = 34, .b = 48, .a = 255 });
+    rl.drawLine(0, menu_height, screen_width, menu_height, .gray);
+
+    var x: f32 = 8;
+    const padding: f32 = 12;
+    const spacing: f32 = 16;
+
+    const mouse = rl.getMousePosition();
+    const clicked = rl.isMouseButtonPressed(rl.MouseButton.left);
+
+    inline for (menu_items, 0..) |item, idx| {
+        const text_w = rl.measureText(item.label, 18);
+        const w = @as(f32, @floatFromInt(text_w)) + padding * 2;
+        const rect = rl.Rectangle{ .x = x, .y = 0, .width = w, .height = menu_height_f };
+
+        const hovered = rl.checkCollisionPointRec(mouse, rect);
+        const is_active = if (active_item.*) |current| current == idx else false;
+        const bg = if (hovered or is_active) rl.Color{ .r = 50, .g = 56, .b = 72, .a = 255 } else rl.Color{ .r = 30, .g = 34, .b = 48, .a = 255 };
+        rl.drawRectangleRec(rect, bg);
+        rl.drawText(item.label, @intFromFloat(x + padding), 6, 18, .ray_white);
+
+        if (hovered and clicked) {
+            active_item.* = idx;
+            item.action(); // call your handler
+        }
+
+        x += w + spacing;
+    }
+}
+
+fn inventoryAction() void {}
+fn buildAction() void {}
+fn settingsAction() void {}
+
+const MenuItem = struct {
+    label: [:0]const u8,
+    action: fn () void,
+};
 pub fn runRaylib() anyerror!void {
     const WORLD_W: f32 = shared.World.WIDTH;
     const WORLD_H: f32 = shared.World.HEIGHT;
     // Initialization
     //--------------------------------------------------------------------------------------
-    const screenWidth = 800;
-    const screenHeight = 450;
+    const screen_width = 800;
+    const screen_height = 450;
+    const menu_height: i32 = 28;
 
-    rl.initWindow(screenWidth, screenHeight, "Bromance");
+    const menu_items_array = [_]MenuItem{
+        .{ .label = "Maps", .action = toggle_map },
+        .{ .label = "Inventory", .action = inventoryAction },
+        .{ .label = "Build", .action = buildAction },
+        .{ .label = "Settings", .action = settingsAction },
+    };
+    const menu_items = menu_items_array[0..];
+    var active_item: ?usize = null;
+
+    rl.initWindow(screen_width, screen_height, "Bromance");
     defer rl.closeWindow(); // Close window and OpenGL context
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
@@ -159,12 +211,12 @@ pub fn runRaylib() anyerror!void {
     const speed = 200;
     var camera = rl.Camera2D{
         .target = .init(player.pos.x + 20, player.pos.y + 20),
-        .offset = .init(screenWidth / 2, screenHeight / 2),
+        .offset = .init(screen_width / 2, screen_height / 2),
         .rotation = 0,
         .zoom = 1,
     };
 
-    // // Minimap
+    // Minimap
     const MINIMAP_SIZE: i32 = 180;
     const UI_MARGIN_PX: i32 = 32; // keep minimap a bit away from edges
     const MINIMAP_POS = rl.Vector2{
@@ -185,14 +237,16 @@ pub fn runRaylib() anyerror!void {
         const dt = rl.getFrameTime();
 
         // Input handling - just capture the intended move
-        if (rl.isKeyDown(.down)) {
+        if (rl.isKeyDown(.down) or rl.isKeyDown(.s)) {
             pending_move = MovementCommand{ .direction = .Down, .speed = speed, .delta = dt };
-        } else if (rl.isKeyDown(.up)) {
+        } else if (rl.isKeyDown(.up) or rl.isKeyDown(.w)) {
             pending_move = MovementCommand{ .direction = .Up, .speed = speed, .delta = dt };
-        } else if (rl.isKeyDown(.right)) {
+        } else if (rl.isKeyDown(.right) or rl.isKeyDown(.d)) {
             pending_move = MovementCommand{ .direction = .Right, .speed = speed, .delta = dt };
-        } else if (rl.isKeyDown(.left)) {
+        } else if (rl.isKeyDown(.left) or rl.isKeyDown(.a)) {
             pending_move = MovementCommand{ .direction = .Left, .speed = speed, .delta = dt };
+        } else if (rl.isKeyPressed(.m)) {
+            toggle_map();
         } else {
             pending_move = null;
         }
@@ -234,10 +288,11 @@ pub fn runRaylib() anyerror!void {
         rl.beginDrawing();
         defer rl.endDrawing();
 
-        // Camera follows player
-        updateCameraFocus(&camera, player, screenWidth, screenHeight, WORLD_W, WORLD_H);
-
         rl.clearBackground(rl.Color.ray_white);
+
+        // Camera follows player
+        updateCameraFocus(&camera, player, screen_width, screen_height, WORLD_W, WORLD_H);
+
         rl.beginMode2D(camera);
 
         // Draw World
@@ -247,22 +302,26 @@ pub fn runRaylib() anyerror!void {
         drawConstruction(townhall_texture, lake_texture, terrain_texture, WORLD_W, WORLD_H);
 
         try player.draw();
-        camera.end();
+        rl.endMode2D();
+
+        drawMenu(screen_width, menu_height, menu_items, &active_item);
 
         // UI: draw the minimap (note the source height is flipped for render textures)
-        updateMinimap(minimap, player.pos, WORLD_W, WORLD_H, MINIMAP_SIZE, MINIMAP_POS);
+        if (map_opened) {
+            updateMinimap(minimap, player.pos, WORLD_W, WORLD_H, MINIMAP_SIZE, MINIMAP_POS);
+        }
 
         var buf: [128]u8 = undefined;
         const pos_text = std.fmt.bufPrintZ(&buf, "Player: ({:.0}, {:.0})", .{ player.pos.x, player.pos.y }) catch "";
         rl.drawText(
             pos_text,
             MINIMAP_POS.x + 10,
-            10,
+            @intFromFloat(@as(f32, @floatFromInt(menu_height)) + 10),
             20,
             .dark_gray,
         );
 
-        rl.drawFPS(10, 10);
+        rl.drawFPS(10, menu_height + 10);
 
         //sending to server
         udp_client.pollState();
@@ -282,13 +341,11 @@ fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f3
 
         // Draw buildings on minimap
         for (shared.MAP_BUILDINGS) |building| {
-            const template = shared.getBuildingTemplate(building.building_type);
-
             // Convert building tile coordinates to world pixels
             const building_x = tileToWorld(building.tile_x, world_w, shared.World.TILES_X);
             const building_y = tileToWorld(building.tile_y, world_h, shared.World.TILES_Y);
-            const building_w = tileToWorld(template.width_tiles, world_w, shared.World.TILES_X);
-            const building_h = tileToWorld(template.height_tiles, world_h, shared.World.TILES_Y);
+            const building_w = tileToWorld(building.width_tiles, world_w, shared.World.TILES_X);
+            const building_h = tileToWorld(building.height_tiles, world_h, shared.World.TILES_Y);
 
             // Convert to minimap coordinates
             const minimap_x = (building_x / world_w) * size;
