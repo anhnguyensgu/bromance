@@ -12,6 +12,7 @@ pub const PacketType = enum(u8) {
     ping = 1,
     move = 2,
     state_update = 3,
+    all_players_state = 4,
 };
 
 pub const StatePayload = struct {
@@ -42,10 +43,74 @@ pub const StatePayload = struct {
     }
 };
 
+pub const PlayerInfo = struct {
+    session_id: u32,
+    x: f32,
+    y: f32,
+
+    pub fn size() usize {
+        return 12; // 4 + 4 + 4
+    }
+
+    pub fn encode(self: PlayerInfo, dest: []u8) ![]u8 {
+        if (dest.len < size()) return error.BufferTooSmall;
+        const slice = dest[0..size()];
+        std.mem.writeInt(u32, slice[0..4], self.session_id, wire_endian);
+        std.mem.writeInt(u32, slice[4..8], @as(u32, @bitCast(self.x)), wire_endian);
+        std.mem.writeInt(u32, slice[8..12], @as(u32, @bitCast(self.y)), wire_endian);
+        return slice;
+    }
+
+    pub fn decode(buf: []const u8) !PlayerInfo {
+        if (buf.len < size()) return error.BufferTooSmall;
+        return .{
+            .session_id = std.mem.readInt(u32, buf[0..4], wire_endian),
+            .x = @as(f32, @bitCast(std.mem.readInt(u32, buf[4..8], wire_endian))),
+            .y = @as(f32, @bitCast(std.mem.readInt(u32, buf[8..12], wire_endian))),
+        };
+    }
+};
+
+pub const MAX_PLAYERS: usize = 16;
+
+pub const AllPlayersPayload = struct {
+    count: u8,
+    players: [MAX_PLAYERS]PlayerInfo,
+
+    pub fn size() usize {
+        return 1 + (PlayerInfo.size() * MAX_PLAYERS); // count + players array
+    }
+
+    pub fn encode(self: AllPlayersPayload, dest: []u8) ![]u8 {
+        if (dest.len < size()) return error.BufferTooSmall;
+        const slice = dest[0..size()];
+        slice[0] = self.count;
+        var offset: usize = 1;
+        for (self.players[0..self.count]) |player| {
+            _ = try player.encode(slice[offset..]);
+            offset += PlayerInfo.size();
+        }
+        return slice;
+    }
+
+    pub fn decode(buf: []const u8) !AllPlayersPayload {
+        if (buf.len < size()) return error.BufferTooSmall;
+        var result: AllPlayersPayload = undefined;
+        result.count = buf[0];
+        var offset: usize = 1;
+        for (0..result.count) |i| {
+            result.players[i] = try PlayerInfo.decode(buf[offset..]);
+            offset += PlayerInfo.size();
+        }
+        return result;
+    }
+};
+
 pub const PacketPayload = union(PacketType) {
     ping: PingPayload,
     move: MovePayload,
     state_update: StatePayload,
+    all_players_state: AllPlayersPayload,
     const Self = @This();
 
     pub fn decodePayload(header: *const PacketHeader, payload: []const u8) !Self {
@@ -53,6 +118,7 @@ pub const PacketPayload = union(PacketType) {
             .ping => return .{ .ping = try decodeGenericPayload(PingPayload, payload) },
             .move => return .{ .move = try decodeGenericPayload(MovePayload, payload) },
             .state_update => return .{ .state_update = try decodeGenericPayload(StatePayload, payload) },
+            .all_players_state => return .{ .all_players_state = try decodeGenericPayload(AllPlayersPayload, payload) },
         }
     }
 
@@ -61,6 +127,7 @@ pub const PacketPayload = union(PacketType) {
             .ping => |b| return try encodeGenericPayload(PingPayload, b),
             .move => |b| return try encodeGenericPayload(MovePayload, b),
             .state_update => |b| return try encodeGenericPayload(StatePayload, b),
+            .all_players_state => |b| return try encodeGenericPayload(AllPlayersPayload, b),
         }
     }
 };
@@ -213,6 +280,11 @@ pub const Packet = struct {
             .state_update => |payload_state| {
                 var tmp: [StatePayload.size()]u8 = undefined;
                 const encoded = try payload_state.encode(&tmp);
+                std.mem.copyForwards(u8, body_slice, encoded);
+            },
+            .all_players_state => |payload_players| {
+                var tmp: [AllPlayersPayload.size()]u8 = undefined;
+                const encoded = try payload_players.encode(&tmp);
                 std.mem.copyForwards(u8, body_slice, encoded);
             },
         }

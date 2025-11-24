@@ -8,47 +8,7 @@ const UdpClient = client.UdpClient;
 const applyMoveToVector = client.applyMoveToVector;
 const shared = @import("shared.zig");
 
-// Helper function to convert tile coordinates to world pixel coordinates
-fn tileToWorld(tile_coord: i32, world_size: f32, tiles_count: i32) f32 {
-    const tile_size = world_size / @as(f32, @floatFromInt(tiles_count));
-    return @as(f32, @floatFromInt(tile_coord)) * tile_size;
-}
-
-// Check if a position collides with any building on the map
-fn checkBuildingCollision(x: f32, y: f32, w: f32, h: f32) bool {
-    const player_left = x;
-    const player_right = x + w;
-    const player_top = y;
-    const player_bottom = y + h;
-
-    for (shared.MAP_BUILDINGS) |building| {
-        // Skip roads for collision (they are walkable)
-        if (building.building_type == .Road) continue;
-
-        // Convert building tile coordinates to world pixels
-        const building_x = tileToWorld(building.tile_x, shared.World.WIDTH, shared.World.TILES_X);
-        const building_y = tileToWorld(building.tile_y, shared.World.HEIGHT, shared.World.TILES_Y);
-        const building_w = tileToWorld(building.width_tiles, shared.World.WIDTH, shared.World.TILES_X);
-        const building_h = tileToWorld(building.height_tiles, shared.World.HEIGHT, shared.World.TILES_Y);
-
-        const building_left = building_x;
-        const building_right = building_x + building_w;
-        const building_top = building_y;
-        const building_bottom = building_y + building_h;
-
-        // AABB collision detection
-        const overlaps_x = player_right > building_left and player_left < building_right;
-        const overlaps_y = player_bottom > building_top and player_top < building_bottom;
-
-        if (overlaps_x and overlaps_y) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world_w: f32, world_h: f32) void {
+fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
     const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;
     const view_half_h: f32 = (@as(f32, @floatFromInt(screen_height)) * 0.5) / camera.zoom;
 
@@ -56,26 +16,26 @@ fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32,
     var cam_target_y: f32 = player.pos.y + player.size.y * 0.5;
 
     // Basic clamping to world bounds
-    if (world_w > view_half_w * 2) {
-        cam_target_x = std.math.clamp(cam_target_x, view_half_w, world_w - view_half_w);
+    if (world.width > view_half_w * 2) {
+        cam_target_x = std.math.clamp(cam_target_x, view_half_w, world.width - view_half_w);
     } else {
-        cam_target_x = world_w * 0.5;
+        cam_target_x = world.width * 0.5;
     }
-    if (world_h > view_half_h * 2) {
-        cam_target_y = std.math.clamp(cam_target_y, view_half_h, world_h - view_half_h);
+    if (world.height > view_half_h * 2) {
+        cam_target_y = std.math.clamp(cam_target_y, view_half_h, world.height - view_half_h);
     } else {
-        cam_target_y = world_h * 0.5;
+        cam_target_y = world.height * 0.5;
     }
 
-    camera.target = .init(cam_target_x, cam_target_y);
+    camera.target = .init(cam_target_x, cam_target_y - 28);
 }
 
-fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, terrain_texture: rl.Texture2D, world_w: f32, world_h: f32) void {
+fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, terrain_texture: rl.Texture2D, world: shared.World) void {
     // Draw all buildings from map configuration
-    for (shared.MAP_BUILDINGS) |building| {
+    for (world.buildings) |building| {
         // Convert tile coordinates to world pixels
-        const building_x = tileToWorld(building.tile_x, world_w, shared.World.TILES_X);
-        const building_y = tileToWorld(building.tile_y, world_h, shared.World.TILES_Y);
+        const building_x = world.tileToWorldX(building.tile_x);
+        const building_y = world.tileToWorldY(building.tile_y);
 
         switch (building.building_type) {
             .Townhall => {
@@ -155,8 +115,13 @@ const MenuItem = struct {
     action: fn () void,
 };
 pub fn runRaylib() anyerror!void {
-    const WORLD_W: f32 = shared.World.WIDTH;
-    const WORLD_H: f32 = shared.World.HEIGHT;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var world = try shared.World.loadFromFile(allocator, "assets/world.json");
+    defer world.deinit(allocator);
+
     // Initialization
     //--------------------------------------------------------------------------------------
     const screen_width = 800;
@@ -226,9 +191,9 @@ pub fn runRaylib() anyerror!void {
     const minimap = try rl.loadRenderTexture(MINIMAP_SIZE, MINIMAP_SIZE);
     defer rl.unloadRenderTexture(minimap);
 
-    const move_send_interval: f32 = 0.05;
+    const move_send_interval: f32 = 0.015;
     var move_accum: f32 = 0.0;
-    var udp_client = try UdpClient.init(.{ .server_ip = "127.0.0.1", .server_port = 9999 });
+    var udp_client = try UdpClient.init(allocator, .{ .server_ip = "127.0.0.1", .server_port = 9999 });
     defer udp_client.deinit();
     udp_client.sendPing() catch |err| std.debug.print("failed to send ping: {s}\n", .{@errorName(err)});
 
@@ -263,13 +228,13 @@ pub fn runRaylib() anyerror!void {
         if (pending_move) |cmd| {
             const old_pos = player.pos;
             var new_pos = old_pos;
-            applyMoveToVector(&new_pos, cmd);
+            applyMoveToVector(&new_pos, cmd, world);
 
             // Check terrain collision using shared World logic
-            const terrain_collision = shared.World.checkCollision(new_pos.x, new_pos.y, player.size.x, player.size.y, cmd.direction);
+            const terrain_collision = world.checkCollision(new_pos.x, new_pos.y, player.size.x, player.size.y, cmd.direction);
 
             // Check building collision
-            const building_collision = checkBuildingCollision(new_pos.x, new_pos.y, player.size.x, player.size.y);
+            const building_collision = world.checkBuildingCollision(new_pos.x, new_pos.y, player.size.x, player.size.y);
 
             if (!terrain_collision and !building_collision) {
                 player.pos = new_pos;
@@ -282,8 +247,8 @@ pub fn runRaylib() anyerror!void {
         // Clamp to world bounds
         if (player.pos.x < 0) player.pos.x = 0;
         if (player.pos.y < 0) player.pos.y = 0;
-        if (player.pos.x > WORLD_W - player.size.x) player.pos.x = WORLD_W - player.size.x;
-        if (player.pos.y > WORLD_H - player.size.y) player.pos.y = WORLD_H - player.size.y;
+        if (player.pos.x > world.width - player.size.x) player.pos.x = world.width - player.size.x;
+        if (player.pos.y > world.height - player.size.y) player.pos.y = world.height - player.size.y;
 
         rl.beginDrawing();
         defer rl.endDrawing();
@@ -291,15 +256,57 @@ pub fn runRaylib() anyerror!void {
         rl.clearBackground(rl.Color.ray_white);
 
         // Camera follows player
-        updateCameraFocus(&camera, player, screen_width, screen_height, WORLD_W, WORLD_H);
+        updateCameraFocus(&camera, player, screen_width, screen_height, world);
 
         rl.beginMode2D(camera);
 
         // Draw World
-        drawWorldTiles(terrain_texture, WORLD_W, WORLD_H);
+        drawWorldTiles(terrain_texture, world);
 
         // Draw all buildings from map configuration
-        drawConstruction(townhall_texture, lake_texture, terrain_texture, WORLD_W, WORLD_H);
+        drawConstruction(townhall_texture, lake_texture, terrain_texture, world);
+
+        // Draw other players with animation
+        const now_ns: i64 = @intCast(std.time.nanoTimestamp());
+        var it = udp_client.other_players.iterator();
+        while (it.next()) |entry| {
+            const other_player = entry.value_ptr.*;
+
+            // Treat stale updates as idle so animation stops when packets stop
+            const stale_timeout_ns: i64 = 500_000_000; // 500ms
+            const is_moving = other_player.is_moving and (now_ns - other_player.last_update_ns <= stale_timeout_ns);
+
+            // Match Character.draw row/flip logic
+            const row: f32 = switch (other_player.dir) {
+                .Up => 0,
+                .Down => 1,
+                .Right => 2,
+                .Left => 2,
+            };
+            const width: f32 = if (other_player.dir == .Left) -16 else 16;
+
+            // Only animate when moving, otherwise show idle frame (middle frame)
+            const frame: i32 = if (is_moving) blk: {
+                const anim_speed: f32 = 8.0;
+                const global_time = rl.getTime();
+                break :blk @intFromFloat(@mod(global_time * anim_speed, 3.0));
+            } else 0;
+
+            const src = rl.Rectangle{
+                .x = @as(f32, @floatFromInt(frame * 16)),
+                .y = row * 16,
+                .width = width,
+                .height = 16,
+            };
+            const dest = rl.Rectangle{
+                .x = other_player.pos.x,
+                .y = other_player.pos.y,
+                .width = 32,
+                .height = 32,
+            };
+            // Tint blue to distinguish from local player
+            rl.drawTexturePro(char_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color{ .r = 200, .g = 200, .b = 255, .a = 255 });
+        }
 
         try player.draw();
         rl.endMode2D();
@@ -308,7 +315,7 @@ pub fn runRaylib() anyerror!void {
 
         // UI: draw the minimap (note the source height is flipped for render textures)
         if (map_opened) {
-            updateMinimap(minimap, player.pos, WORLD_W, WORLD_H, MINIMAP_SIZE, MINIMAP_POS);
+            updateMinimap(minimap, player.pos, world, MINIMAP_SIZE, MINIMAP_POS);
         }
 
         var buf: [128]u8 = undefined;
@@ -324,14 +331,16 @@ pub fn runRaylib() anyerror!void {
         rl.drawFPS(10, menu_height + 10);
 
         //sending to server
-        udp_client.pollState();
+        udp_client.pollState(world) catch |err| std.debug.print("failed to poll state: {s}\n", .{@errorName(err)});
         if (udp_client.sampleInterpolated()) |state| {
             player.pos = state;
         }
+        // render other users
+
     }
 }
 
-fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f32, world_h: f32, size: f32, MINIMAP_POS: rl.Vector2) void {
+fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: shared.World, size: f32, MINIMAP_POS: rl.Vector2) void {
     // 1. Update the minimap texture content (Inside a block!)
     {
         rl.beginTextureMode(target);
@@ -340,18 +349,18 @@ fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f3
         rl.clearBackground(rl.Color.light_gray);
 
         // Draw buildings on minimap
-        for (shared.MAP_BUILDINGS) |building| {
+        for (world.buildings) |building| {
             // Convert building tile coordinates to world pixels
-            const building_x = tileToWorld(building.tile_x, world_w, shared.World.TILES_X);
-            const building_y = tileToWorld(building.tile_y, world_h, shared.World.TILES_Y);
-            const building_w = tileToWorld(building.width_tiles, world_w, shared.World.TILES_X);
-            const building_h = tileToWorld(building.height_tiles, world_h, shared.World.TILES_Y);
+            const building_x = world.tileToWorldX(building.tile_x);
+            const building_y = world.tileToWorldY(building.tile_y);
+            const building_w = world.tileToWorldX(building.width_tiles);
+            const building_h = world.tileToWorldY(building.height_tiles);
 
             // Convert to minimap coordinates
-            const minimap_x = (building_x / world_w) * size;
-            const minimap_y = (building_y / world_h) * size;
-            const minimap_w = (building_w / world_w) * size;
-            const minimap_h = (building_h / world_h) * size;
+            const minimap_x = (building_x / world.width) * size;
+            const minimap_y = (building_y / world.height) * size;
+            const minimap_w = (building_w / world.width) * size;
+            const minimap_h = (building_h / world.height) * size;
 
             // Choose color based on building type
             const building_color = switch (building.building_type) {
@@ -368,8 +377,8 @@ fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f3
         }
 
         // Draw player
-        const px = (player_pos.x / world_w) * size;
-        const py = (player_pos.y / world_h) * size;
+        const px = (player_pos.x / world.width) * size;
+        const py = (player_pos.y / world.height) * size;
         rl.drawCircle(@intFromFloat(px), @intFromFloat(py), 4, rl.Color.red);
     } // <--- Texture mode ends here
 
@@ -390,13 +399,13 @@ fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world_w: f3
     rl.drawRectangleLines(@intFromFloat(dst.x), @intFromFloat(dst.y), @intFromFloat(size), @intFromFloat(size), .black);
 }
 
-fn drawWorldTiles(texture: rl.Texture2D, world_w: f32, world_h: f32) void {
-    const tile_w: f32 = world_w / @as(f32, @floatFromInt(shared.World.TILES_X));
-    const tile_h: f32 = world_h / @as(f32, @floatFromInt(shared.World.TILES_Y));
+fn drawWorldTiles(texture: rl.Texture2D, world: shared.World) void {
+    const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
+    const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
     var ty: i32 = 0;
-    while (ty < shared.World.TILES_Y) : (ty += 1) {
+    while (ty < world.tiles_y) : (ty += 1) {
         var tx: i32 = 0;
-        while (tx < shared.World.TILES_X) : (tx += 1) {
+        while (tx < world.tiles_x) : (tx += 1) {
             const terrain_idx: i32 = 0; // Default Grass
 
             // Source rect from sprite sheet (horizontal strip)
