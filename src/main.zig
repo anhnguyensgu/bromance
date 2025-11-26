@@ -1,10 +1,11 @@
 const std = @import("std");
 const rl = @import("raylib");
 const command = @import("movement/command.zig");
-const MovementCommand = command.MovementCommand;
+const MovementCommand = @import("movement/command.zig").MovementCommand;
 const MoveDirection = command.MoveDirection;
 const client = @import("client/udp_client.zig");
-const UdpClient = client.UdpClient;
+const UdpClient = @import("client/udp_client.zig").UdpClient;
+const ClientGameState = @import("client/game_state.zig").ClientGameState;
 const applyMoveToVector = client.applyMoveToVector;
 const shared = @import("shared.zig");
 
@@ -191,64 +192,58 @@ pub fn runRaylib() anyerror!void {
     const minimap = try rl.loadRenderTexture(MINIMAP_SIZE, MINIMAP_SIZE);
     defer rl.unloadRenderTexture(minimap);
 
-    const move_send_interval: f32 = 0.015;
-    var move_accum: f32 = 0.0;
-    var udp_client = try UdpClient.init(allocator, .{ .server_ip = "127.0.0.1", .server_port = 9999 });
+    // Initialize Game State
+    var game_state = ClientGameState.init(allocator);
+    defer game_state.deinit();
+
+    // Initialize UDP Client
+    var udp_client = try UdpClient.init(&game_state, world, .{
+        .server_ip = "127.0.0.1",
+        .server_port = 9999,
+    });
     defer udp_client.deinit();
-    udp_client.sendPing() catch |err| std.debug.print("failed to send ping: {s}\n", .{@errorName(err)});
 
-    var pending_move: ?MovementCommand = null;
+    // Spawn Network Thread
+    const net_thread = try std.Thread.spawn(.{}, UdpClient.run, .{&udp_client});
+    defer net_thread.join();
+
+    // Main game loop
     while (!rl.windowShouldClose()) {
-        const dt = rl.getFrameTime();
+        const delta = rl.getFrameTime();
+        var move_cmd: ?MovementCommand = null;
 
-        // Input handling - just capture the intended move
-        if (rl.isKeyDown(.down) or rl.isKeyDown(.s)) {
-            pending_move = MovementCommand{ .direction = .Down, .speed = speed, .delta = dt };
-        } else if (rl.isKeyDown(.up) or rl.isKeyDown(.w)) {
-            pending_move = MovementCommand{ .direction = .Up, .speed = speed, .delta = dt };
-        } else if (rl.isKeyDown(.right) or rl.isKeyDown(.d)) {
-            pending_move = MovementCommand{ .direction = .Right, .speed = speed, .delta = dt };
-        } else if (rl.isKeyDown(.left) or rl.isKeyDown(.a)) {
-            pending_move = MovementCommand{ .direction = .Left, .speed = speed, .delta = dt };
+        if (rl.isKeyDown(.w) or rl.isKeyDown(.up)) {
+            move_cmd = .{ .direction = .Up, .speed = speed, .delta = delta };
+        } else if (rl.isKeyDown(.s) or rl.isKeyDown(.down)) {
+            move_cmd = .{ .direction = .Down, .speed = speed, .delta = delta };
+        } else if (rl.isKeyDown(.a) or rl.isKeyDown(.left)) {
+            move_cmd = .{ .direction = .Left, .speed = speed, .delta = delta };
+        } else if (rl.isKeyDown(.d) or rl.isKeyDown(.right)) {
+            move_cmd = .{ .direction = .Right, .speed = speed, .delta = delta };
         } else if (rl.isKeyPressed(.m)) {
             toggle_map();
-        } else {
-            pending_move = null;
         }
 
-        move_accum += dt;
-        if (move_accum >= move_send_interval) {
-            move_accum = 0;
-            if (pending_move) |cmd| {
-                udp_client.sendMove(cmd) catch |err| std.debug.print("failed to send move: {s}\n", .{@errorName(err)});
-            }
+        if (move_cmd) |cmd| {
+            // Push input to game state (thread-safe)
+            _ = game_state.pushInput(cmd);
+            // However, the 'reconcileState' logic is now in the network thread.
+            // To get instant feedback, we should probably maintain a 'visual_pos' that we update immediately here.
+            // But for simplicity of this refactor, let's stick to the architecture:
+            // Input -> Queue -> Network Thread -> Update Snapshot (Reconciled) -> Render Thread reads Snapshot.
+            // This adds 1 RTT + Processing delay to visual movement if we only read confirmed snapshots.
+            // BUT, our 'reconcileState' logic in UdpClient (now Network Thread) applies pending moves to the latest server state.
+            // So as soon as we push input, if we also had a way to apply it to the latest snapshot locally...
+            // Actually, the previous code called 'sendMove' which updated 'pending_moves'.
+            // Then 'pollState' would reconcile.
+            // Here, we push to 'pending_moves'. The network thread reads it and sends it.
+            // The network thread ALSO receives packets and reconciles.
+            // If we want smooth movement, we need to predict locally.
+            // Let's just push input for now and see.
+
         }
 
-        // Apply movement with collision detection
-        if (pending_move) |cmd| {
-            const old_pos = player.pos;
-            var new_pos = old_pos;
-            applyMoveToVector(&new_pos, cmd, world);
-
-            // Check terrain collision using shared World logic
-            const terrain_collision = world.checkCollision(new_pos.x, new_pos.y, player.size.x, player.size.y, cmd.direction);
-
-            // Check building collision
-            const building_collision = world.checkBuildingCollision(new_pos.x, new_pos.y, player.size.x, player.size.y);
-
-            if (!terrain_collision and !building_collision) {
-                player.pos = new_pos;
-            }
-            player.update(dt, cmd.direction, true);
-        } else {
-            player.update(dt, .Down, false);
-        }
-
-        // Clamp to world bounds
-        if (player.pos.x < 0) player.pos.x = 0;
-        if (player.pos.y < 0) player.pos.y = 0;
-        if (player.pos.x > world.width - player.size.x) player.pos.x = world.width - player.size.x;
-        if (player.pos.y > world.height - player.size.y) player.pos.y = world.height - player.size.y;
+        // ... (Rendering) ...
 
         rl.beginDrawing();
         defer rl.endDrawing();
@@ -256,6 +251,7 @@ pub fn runRaylib() anyerror!void {
         rl.clearBackground(rl.Color.ray_white);
 
         // Camera follows player
+        camera.target = player.pos;
         updateCameraFocus(&camera, player, screen_width, screen_height, world);
 
         rl.beginMode2D(camera);
@@ -267,45 +263,59 @@ pub fn runRaylib() anyerror!void {
         drawConstruction(townhall_texture, lake_texture, terrain_texture, world);
 
         // Draw other players with animation
-        const now_ns: i64 = @intCast(std.time.nanoTimestamp());
-        var it = udp_client.other_players.iterator();
-        while (it.next()) |entry| {
-            const other_player = entry.value_ptr.*;
+        {
+            game_state.mutex.lock();
+            defer game_state.mutex.unlock();
 
-            // Treat stale updates as idle so animation stops when packets stop
-            const stale_timeout_ns: i64 = 500_000_000; // 500ms
-            const is_moving = other_player.is_moving and (now_ns - other_player.last_update_ns <= stale_timeout_ns);
+            var it = game_state.other_players.iterator();
+            while (it.next()) |entry| {
+                const other_player = entry.value_ptr.*;
 
-            // Match Character.draw row/flip logic
-            const row: f32 = switch (other_player.dir) {
-                .Up => 0,
-                .Down => 1,
-                .Right => 2,
-                .Left => 2,
-            };
-            const width: f32 = if (other_player.dir == .Left) -16 else 16;
+                // Calculate sprite row based on direction
+                const row: f32 = switch (other_player.dir) {
+                    .Up => 0,
+                    .Down => 1,
+                    .Right => 2,
+                    .Left => 2,
+                };
 
-            // Only animate when moving, otherwise show idle frame (middle frame)
-            const frame: i32 = if (is_moving) blk: {
-                const anim_speed: f32 = 8.0;
-                const global_time = rl.getTime();
-                break :blk @intFromFloat(@mod(global_time * anim_speed, 3.0));
-            } else 0;
+                const now_ns: i64 = @intCast(std.time.nanoTimestamp());
+                const stale_timeout_ns: i64 = 500_000_000; // 500ms
+                const is_moving = other_player.is_moving and (now_ns - other_player.last_update_ns <= stale_timeout_ns);
 
-            const src = rl.Rectangle{
-                .x = @as(f32, @floatFromInt(frame * 16)),
-                .y = row * 16,
-                .width = width,
-                .height = 16,
-            };
-            const dest = rl.Rectangle{
-                .x = other_player.pos.x,
-                .y = other_player.pos.y,
-                .width = 32,
-                .height = 32,
-            };
-            // Tint blue to distinguish from local player
-            rl.drawTexturePro(char_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color{ .r = 200, .g = 200, .b = 255, .a = 255 });
+                // Only animate when moving
+                const frame: i32 = if (is_moving) blk: {
+                    const anim_speed: f32 = 8.0;
+                    const global_time = rl.getTime();
+                    break :blk @intFromFloat(@mod(global_time * anim_speed, 3.0));
+                } else 0; // Idle frame
+
+                const src = rl.Rectangle{
+                    .x = @as(f32, @floatFromInt(frame * 16)),
+                    .y = row * 16,
+                    .width = if (other_player.dir == .Left) -16 else 16, // Flip for left direction
+                    .height = 16,
+                };
+                const dest = rl.Rectangle{
+                    .x = other_player.pos.x,
+                    .y = other_player.pos.y,
+                    .width = 32,
+                    .height = 32,
+                };
+                rl.drawTexturePro(char_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color{ .r = 200, .g = 200, .b = 255, .a = 255 });
+            }
+        }
+
+        // Interpolate and Draw Local Player
+        if (game_state.sampleInterpolated()) |pos| {
+            player.pos = pos;
+        }
+
+        // Update player animation state based on input (visual only)
+        if (move_cmd) |cmd| {
+            player.update(delta, cmd.direction, true);
+        } else {
+            player.update(delta, .Down, false);
         }
 
         try player.draw();
@@ -329,15 +339,10 @@ pub fn runRaylib() anyerror!void {
         );
 
         rl.drawFPS(10, menu_height + 10);
-
-        //sending to server
-        udp_client.pollState(world) catch |err| std.debug.print("failed to poll state: {s}\n", .{@errorName(err)});
-        if (udp_client.sampleInterpolated()) |state| {
-            player.pos = state;
-        }
-        // render other users
-
     }
+
+    // Signal network thread to stop
+    udp_client.running.store(false, .release);
 }
 
 fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: shared.World, size: f32, MINIMAP_POS: rl.Vector2) void {

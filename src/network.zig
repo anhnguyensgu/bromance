@@ -7,6 +7,7 @@ pub const PingPayload = @import("ping/command.zig").PingPayload;
 pub const protocol_version: u8 = 1;
 pub const packet_magic = [2]u8{ 0xAB, 0xCD };
 pub const packet_header_size: usize = 19;
+pub const max_payload_size: usize = 2048;
 
 pub const PacketType = enum(u8) {
     ping = 1,
