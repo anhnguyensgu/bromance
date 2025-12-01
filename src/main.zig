@@ -1,12 +1,17 @@
 const std = @import("std");
+
 const rl = @import("raylib");
+
+const player_mod = @import("character/player.zig");
+const Character = player_mod.Character;
+const CharacterAssets = player_mod.CharacterAssets;
+const ClientGameState = @import("client/game_state.zig").ClientGameState;
+const client = @import("client/udp_client.zig");
+const UdpClient = @import("client/udp_client.zig").UdpClient;
+const applyMoveToVector = client.applyMoveToVector;
 const command = @import("movement/command.zig");
 const MovementCommand = @import("movement/command.zig").MovementCommand;
 const MoveDirection = command.MoveDirection;
-const client = @import("client/udp_client.zig");
-const UdpClient = @import("client/udp_client.zig").UdpClient;
-const ClientGameState = @import("client/game_state.zig").ClientGameState;
-const applyMoveToVector = client.applyMoveToVector;
 const shared = @import("shared.zig");
 
 fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
@@ -31,7 +36,7 @@ fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32,
     camera.target = .init(cam_target_x, cam_target_y - 28);
 }
 
-fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, terrain_texture: rl.Texture2D, world: shared.World) void {
+fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, terrain_texture: rl.Texture2D, ruins_texture: rl.Texture2D, world: shared.World) void {
     // Draw all buildings from map configuration
     for (world.buildings) |building| {
         // Convert tile coordinates to world pixels
@@ -41,7 +46,7 @@ fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, 
         switch (building.building_type) {
             .Townhall => {
                 const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
-                const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(townhall_texture.width), .height = @floatFromInt(townhall_texture.height) };
+                const building_source = rl.Rectangle{ .x = 150, .y = 0, .width = @floatFromInt(@divTrunc(townhall_texture.width, 3)), .height = @floatFromInt(townhall_texture.height) };
                 const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
                 rl.drawTexturePro(townhall_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
             },
@@ -60,6 +65,31 @@ fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, 
                 const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
                 rl.drawTexturePro(terrain_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
             },
+            .House => {
+                // Draw 3x3 block from Ruins texture
+                // Source tiles start at col 0, row 2 (based on analysis)
+                const TILE_SIZE: f32 = 4;
+                const START_COL: f32 = 0;
+                const START_ROW: f32 = 0;
+
+                // We need to draw 9 tiles (3x3 grid)
+                // But the building object defines the total size.
+                // Let's assume the building dimensions (width_tiles, height_tiles) match the 3x3 grid.
+                // We can draw the whole 3x3 block as one large rectangle if they are contiguous in the sprite sheet.
+                // Analysis showed cols 0,1,2 and rows 2,3,4 have content.
+                // So we can draw a 96x96 block from (0, 64).
+
+                const src_x = START_COL * TILE_SIZE;
+                const src_y = START_ROW * TILE_SIZE;
+                const src_w = TILE_SIZE;
+                const src_h = TILE_SIZE;
+
+                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
+                const building_source = rl.Rectangle{ .x = src_x, .y = src_y, .width = src_w, .height = src_h };
+                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
+
+                rl.drawTexturePro(ruins_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+            },
             else => {},
         }
     }
@@ -70,8 +100,14 @@ pub fn main() !void {
 }
 
 var map_opened: bool = false;
+var sidebar_opened: bool = true;
+
 fn toggle_map() void {
     map_opened = !map_opened;
+}
+
+fn toggle_sidebar() void {
+    sidebar_opened = !sidebar_opened;
 }
 
 fn drawMenu(screen_width: i32, menu_height: i32, comptime menu_items: []const MenuItem, active_item: *?usize) void {
@@ -111,6 +147,46 @@ fn inventoryAction() void {}
 fn buildAction() void {}
 fn settingsAction() void {}
 
+// Left Sidebar Menu Item
+const SidebarItem = struct {
+    icon: [:0]const u8, // Unicode icon or short text
+    label: [:0]const u8,
+    action: *const fn () void,
+};
+
+const sidebar_items = [_]SidebarItem{
+    .{ .icon = "M", .label = "Map", .action = &toggle_map },
+    .{ .icon = "I", .label = "Inventory", .action = &inventoryAction },
+    .{ .icon = "B", .label = "Build", .action = &buildAction },
+    .{ .icon = "S", .label = "Settings", .action = &settingsAction },
+};
+
+fn drawSidebar(sidebar_texture: rl.Texture2D, screen_height: i32, menu_height: i32) void {
+    _ = menu_height;
+    const sidebar_width: f32 = 220.0;
+    const screen_height_f = @as(f32, @floatFromInt(screen_height));
+
+    // Calculate source width to maintain aspect ratio
+    // dest_ratio = sidebar_width / screen_height
+    // src_width = src_height * dest_ratio
+    const texture_height = @as(f32, @floatFromInt(sidebar_texture.height));
+    const src_width = texture_height * (sidebar_width / screen_height_f);
+
+    const src = rl.Rectangle{
+        .x = 0,
+        .y = 0,
+        .width = src_width,
+        .height = texture_height,
+    };
+    const dest = rl.Rectangle{
+        .x = 0,
+        .y = 0,
+        .width = sidebar_width,
+        .height = screen_height_f,
+    };
+    rl.drawTexturePro(sidebar_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color.white);
+}
+
 const MenuItem = struct {
     label: [:0]const u8,
     action: fn () void,
@@ -127,16 +203,7 @@ pub fn runRaylib() anyerror!void {
     //--------------------------------------------------------------------------------------
     const screen_width = 800;
     const screen_height = 450;
-    const menu_height: i32 = 28;
-
-    const menu_items_array = [_]MenuItem{
-        .{ .label = "Maps", .action = toggle_map },
-        .{ .label = "Inventory", .action = inventoryAction },
-        .{ .label = "Build", .action = buildAction },
-        .{ .label = "Settings", .action = settingsAction },
-    };
-    const menu_items = menu_items_array[0..];
-    var active_item: ?usize = null;
+    const menu_height: i32 = 0;
 
     rl.initWindow(screen_width, screen_height, "Bromance");
     defer rl.closeWindow(); // Close window and OpenGL context
@@ -145,16 +212,35 @@ pub fn runRaylib() anyerror!void {
     //--------------------------------------------------------------------------------------
 
     // Main game loop
-    const img = try rl.loadImage("assets/combined_sprite_sheet_48x48.png");
-    defer rl.unloadImage(img);
-    const char_texture = try rl.loadTextureFromImage(img);
-    defer rl.unloadTexture(char_texture);
+    // Load Character Assets
+    const assets = CharacterAssets{
+        .idle_up = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Back.PNG"),
+        .idle_down = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Front.PNG"),
+        .idle_left = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Left.PNG"),
+        .idle_right = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Right.PNG"),
+        .walk_up = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Back.PNG"),
+        .walk_down = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Front.PNG"),
+        .walk_left = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Left.PNG"),
+        .walk_right = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Right.PNG"),
+        .shadow = try rl.loadTexture("assets/MainCharacter/MainC_Shadow.png"),
+    };
+    defer {
+        rl.unloadTexture(assets.idle_up);
+        rl.unloadTexture(assets.idle_down);
+        rl.unloadTexture(assets.idle_left);
+        rl.unloadTexture(assets.idle_right);
+        rl.unloadTexture(assets.walk_up);
+        rl.unloadTexture(assets.walk_down);
+        rl.unloadTexture(assets.walk_left);
+        rl.unloadTexture(assets.walk_right);
+        rl.unloadTexture(assets.shadow);
+    }
     const terrain_img = try rl.loadImage("assets/terrain_sprites.png");
     defer rl.unloadImage(terrain_img);
     const terrain_texture = try rl.loadTextureFromImage(terrain_img);
     defer rl.unloadTexture(terrain_texture);
 
-    const townhall_img = try rl.loadImage("assets/townhall_medium.png");
+    const townhall_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
     defer rl.unloadImage(townhall_img);
     const townhall_texture = try rl.loadTextureFromImage(townhall_img);
     defer rl.unloadTexture(townhall_texture);
@@ -164,16 +250,12 @@ pub fn runRaylib() anyerror!void {
     const lake_texture = try rl.loadTextureFromImage(lake_img);
     defer rl.unloadTexture(lake_texture);
 
-    var player = Character{
-        .pos = rl.Vector2{ .x = 350, .y = 200 },
-        .size = rl.Vector2{ .x = 32, .y = 32 },
-        .is_moving = false,
-        .char_texture = char_texture,
-        .dir = .Up,
-        .frame_index = 0,
-        .anim_timer = 0,
-        .debug = true,
-    };
+    const ruins_img = try rl.loadImage("assets/Buildings/Topdown RPG 32x32 - Ruins.PNG");
+    defer rl.unloadImage(ruins_img);
+    const ruins_texture = try rl.loadTextureFromImage(ruins_img);
+    defer rl.unloadTexture(ruins_texture);
+
+    var player = Character.init(rl.Vector2{ .x = 350, .y = 200 }, rl.Vector2{ .x = 32, .y = 32 });
     const speed = 200;
     var camera = rl.Camera2D{
         .target = .init(player.pos.x + 20, player.pos.y + 20),
@@ -260,7 +342,7 @@ pub fn runRaylib() anyerror!void {
         drawWorldTiles(terrain_texture, world);
 
         // Draw all buildings from map configuration
-        drawConstruction(townhall_texture, lake_texture, terrain_texture, world);
+        drawConstruction(townhall_texture, lake_texture, terrain_texture, ruins_texture, world);
 
         // Draw other players with animation
         {
@@ -272,29 +354,45 @@ pub fn runRaylib() anyerror!void {
                 const other_player = entry.value_ptr.*;
 
                 // Calculate sprite row based on direction
-                const row: f32 = switch (other_player.dir) {
-                    .Up => 0,
-                    .Down => 1,
-                    .Right => 2,
-                    .Left => 2,
-                };
+                // Calculate sprite row based on direction
+                // const row: f32 = 0; // Only one row in new asset
 
                 const now_ns: i64 = @intCast(std.time.nanoTimestamp());
                 const stale_timeout_ns: i64 = 500_000_000; // 500ms
                 const is_moving = other_player.is_moving and (now_ns - other_player.last_update_ns <= stale_timeout_ns);
 
-                // Only animate when moving
-                const frame: i32 = if (is_moving) blk: {
-                    const anim_speed: f32 = 8.0;
-                    const global_time = rl.getTime();
-                    break :blk @intFromFloat(@mod(global_time * anim_speed, 3.0));
-                } else 0; // Idle frame
+                // Draw shadow
+                const shadow_dest = rl.Rectangle{
+                    .x = other_player.pos.x,
+                    .y = other_player.pos.y + 2,
+                    .width = 32,
+                    .height = 32,
+                };
+                rl.drawTexturePro(assets.shadow, rl.Rectangle{ .x = 0, .y = 0, .width = 32, .height = 32 }, shadow_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+
+                // Select texture and frame count
+                const texture = if (is_moving) switch (other_player.dir) {
+                    .Up => assets.walk_up,
+                    .Down => assets.walk_down,
+                    .Left => assets.walk_left,
+                    .Right => assets.walk_right,
+                } else switch (other_player.dir) {
+                    .Up => assets.idle_up,
+                    .Down => assets.idle_down,
+                    .Left => assets.idle_left,
+                    .Right => assets.idle_right,
+                };
+
+                const frame_count: f32 = if (is_moving) 4.0 else 9.0;
+                const anim_speed: f32 = 8.0;
+                const global_time = rl.getTime();
+                const frame: i32 = @intFromFloat(@mod(global_time * anim_speed, frame_count));
 
                 const src = rl.Rectangle{
-                    .x = @as(f32, @floatFromInt(frame * 16)),
-                    .y = row * 16,
-                    .width = if (other_player.dir == .Left) -16 else 16, // Flip for left direction
-                    .height = 16,
+                    .x = @as(f32, @floatFromInt(frame * 32)),
+                    .y = 0,
+                    .width = 32,
+                    .height = 32,
                 };
                 const dest = rl.Rectangle{
                     .x = other_player.pos.x,
@@ -302,7 +400,7 @@ pub fn runRaylib() anyerror!void {
                     .width = 32,
                     .height = 32,
                 };
-                rl.drawTexturePro(char_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color{ .r = 200, .g = 200, .b = 255, .a = 255 });
+                rl.drawTexturePro(texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color{ .r = 200, .g = 200, .b = 255, .a = 255 });
             }
         }
 
@@ -318,10 +416,13 @@ pub fn runRaylib() anyerror!void {
             player.update(delta, .Down, false);
         }
 
-        try player.draw();
+        try player.draw(assets);
         rl.endMode2D();
 
-        drawMenu(screen_width, menu_height, menu_items, &active_item);
+        // Draw left sidebar overlay
+        // if (sidebar_opened) {
+        //     drawSidebar(sidebar_texture, screen_height, menu_height);
+        // }
 
         // UI: draw the minimap (note the source height is flipped for render textures)
         if (map_opened) {
@@ -438,65 +539,3 @@ fn drawWorldTiles(texture: rl.Texture2D, world: shared.World) void {
         }
     }
 }
-
-const Character = struct {
-    pos: rl.Vector2,
-    size: rl.Vector2,
-    dir: MoveDirection,
-    is_moving: bool,
-    char_texture: rl.Texture2D,
-    frame_index: usize,
-    anim_timer: f32,
-    debug: bool,
-
-    const WALK_SPEED: f32 = 0.1;
-    const FRAME_WIDTH: f32 = 16;
-    const FRAME_HEIGHT: f32 = 16;
-    const Self = @This();
-
-    pub fn init(pos: rl.Vector2, size: rl.Vector2) Self {
-        return .{
-            .pos = pos,
-            .size = size,
-            .is_moving = false,
-        };
-    }
-
-    pub fn update(self: *Self, dt: f32, dir: MoveDirection, is_moving: bool) void {
-        self.is_moving = is_moving;
-        if (self.is_moving) {
-            self.dir = dir;
-            self.anim_timer += dt;
-            if (self.anim_timer >= WALK_SPEED) {
-                self.anim_timer = 0;
-                self.frame_index = (self.frame_index + 1) % 3;
-            }
-        }
-    }
-
-    pub fn draw(self: *Self) !void {
-        const row: f32 = switch (self.dir) {
-            .Up => 0,
-            .Down => 1,
-            .Right => 2,
-            .Left => 2,
-        };
-        const width: f32 = if (self.dir == .Left) -FRAME_WIDTH else FRAME_WIDTH;
-        const src = rl.Rectangle{
-            .x = FRAME_WIDTH * @as(f32, @floatFromInt(self.frame_index)),
-            .y = row * FRAME_HEIGHT,
-            .width = width,
-            .height = FRAME_HEIGHT,
-        };
-        const dest = rl.Rectangle{
-            .x = self.pos.x,
-            .y = self.pos.y,
-            .width = self.size.x,
-            .height = self.size.y,
-        };
-        rl.drawTexturePro(self.char_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
-        if (self.debug) {
-            rl.drawRectangleLines(@intFromFloat(self.pos.x), @intFromFloat(self.pos.y), @intFromFloat(self.size.x), @intFromFloat(self.size.y), .red);
-        }
-    }
-};
