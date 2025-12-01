@@ -1,16 +1,16 @@
 const std = @import("std");
-
 const rl = @import("raylib");
 
 const MovementCommand = @import("../movement/command.zig").MovementCommand;
+const MoveDirection = @import("../movement/command.zig").MoveDirection;
 const PingPayload = @import("../ping/command.zig").PingPayload;
 const shared = @import("../shared.zig");
 const network = shared.network;
+const ClientGameState = @import("game_state.zig").ClientGameState;
 
-const SERVER_MAX_POS: f32 = 1000.0;
 const MAX_PENDING_MOVES: usize = 32;
 const MAX_SNAPSHOTS: usize = 32;
-const INTERPOLATION_DELAY_NS: i64 = 30_000_000;
+const INTERPOLATION_DELAY_NS: i64 = 45_000_000;
 
 const PendingMove = struct {
     seq: u32,
@@ -22,177 +22,209 @@ const Snapshot = struct {
     pos: rl.Vector2,
 };
 
+pub const OtherPlayerState = struct {
+    pos: rl.Vector2,
+    last_update_ns: i64,
+    dir: MoveDirection = .Down, // Track facing direction for animation
+    is_moving: bool = false, // Track if player is currently moving
+};
+
 pub const UdpClient = struct {
     sock: std.posix.socket_t,
     server_addr: std.net.Address,
-    recv_buf: [512]u8 = undefined,
-    sequence: u32 = 0,
-    pending_moves: [MAX_PENDING_MOVES]PendingMove = undefined,
-    pending_count: usize = 0,
-    snapshots: [MAX_SNAPSHOTS]Snapshot = undefined,
-    snapshot_count: usize = 0,
+    recv_buf: [2048]u8 = undefined, // Increased for all_players_state packets
 
-    pub fn init(config: struct { server_ip: []const u8, server_port: u16 }) !UdpClient {
+    state: *ClientGameState,
+    running: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
+
+    // We need session_id back
+    session_id: u32 = 0,
+
+    // We need world for reconciliation
+    world: shared.World,
+
+    pub fn init(state: *ClientGameState, world: shared.World, config: struct { server_ip: []const u8, server_port: u16 }) !UdpClient {
+        const sock = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM | std.posix.SOCK.NONBLOCK, 0);
+        errdefer std.posix.close(sock);
+
         const addr = try std.net.Address.parseIp4(config.server_ip, config.server_port);
-        const sock = try std.posix.socket(addr.any.family, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
-        return .{ .sock = sock, .server_addr = addr };
+
+        return UdpClient{
+            .sock = sock,
+            .server_addr = addr,
+            .state = state,
+            .session_id = state.session_id, // Get session_id from ClientGameState
+            .world = world,
+        };
     }
 
     pub fn deinit(self: *UdpClient) void {
+        self.running.store(false, .release);
         std.posix.close(self.sock);
     }
 
-    pub fn sendPing(self: *UdpClient) !void {
-        const payload = network.PacketPayload{ .ping = PingPayload{ .timestamp = @as(u64, @intCast(std.time.timestamp())) } };
-        const header = network.PacketHeader{
-            .msg_type = .ping,
-            .flags = .{ .reliable = true, .requires_ack = true },
-            .session_id = 0,
-            .sequence = 0,
-            .ack = 0,
-            .payload_len = @intCast(PingPayload.size()),
-        };
-        var buffer: [network.packet_header_size + PingPayload.size()]u8 = undefined;
-        const packet = network.Packet{ .header = header, .payload = payload };
-        try packet.encode(buffer[0..]);
-        const len = network.packet_header_size + PingPayload.size();
-        _ = try std.posix.sendto(self.sock, buffer[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
+    pub fn run(self: *UdpClient) !void {
+        var buf: [network.packet_header_size + network.max_payload_size]u8 = undefined;
+
+        // Initial ping
+        try self.sendPing();
+
+        while (self.running.load(.acquire)) {
+            // 1. Receive Packets
+            var addr_storage: std.posix.sockaddr.storage = undefined;
+            var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr.storage);
+
+            const received = std.posix.recvfrom(
+                self.sock,
+                &self.recv_buf,
+                0, // No flags needed if socket is non-blocking
+                @ptrCast(&addr_storage),
+                &addr_len,
+            ) catch |err| blk: {
+                if (err == error.WouldBlock) break :blk @as(usize, 0);
+                break :blk @as(usize, 0);
+            };
+
+            if (received > 0) {
+                const packet = network.Packet.decode(self.recv_buf[0..received]) catch {
+                    continue;
+                };
+                try self.handlePacket(packet);
+            }
+
+            // 2. Send Pending Moves
+            // We need to peek at the latest move to send
+            if (self.state.getLatestMove()) |move| {
+                // Send move packet
+                var packet = network.Packet{
+                    .header = .{
+                        .msg_type = .move,
+                        .flags = .{ .reliable = true },
+                        .sequence = move.seq,
+                        .session_id = self.session_id,
+                        .ack = 0, // Server will fill this
+                        .payload_len = @intCast(MovementCommand.size()),
+                    },
+                    .payload = .{ .move = move.cmd },
+                };
+
+                try packet.encode(&buf);
+                const len = network.packet_header_size + packet.header.payload_len;
+                _ = try std.posix.sendto(self.sock, buf[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
+            }
+
+            // Sleep a bit to avoid burning CPU (1ms)
+            // Sleep a bit to avoid burning CPU (1ms)
+            std.posix.nanosleep(0, 1_000_000);
+        }
     }
 
-    pub fn sendMove(self: *UdpClient, move: MovementCommand) !void {
-        const payload = network.PacketPayload{ .move = move };
-        const header = network.PacketHeader{
-            .msg_type = .move,
-            .flags = .{ .reliable = true },
-            .session_id = 0,
-            .sequence = self.sequence + 1,
-            .ack = 0,
-            .payload_len = @intCast(MovementCommand.size()),
-        };
-        var buffer: [network.packet_header_size + MovementCommand.size()]u8 = undefined;
-        const packet = network.Packet{ .header = header, .payload = payload };
-        try packet.encode(buffer[0..]);
-        const len = network.packet_header_size + MovementCommand.size();
-        _ = try std.posix.sendto(self.sock, buffer[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
-        self.sequence = header.sequence;
-        self.recordPending(.{ .seq = header.sequence, .cmd = move });
-    }
-
-    pub fn pollState(self: *UdpClient) void {
-        var addr_storage: std.posix.sockaddr.storage = undefined;
-        var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr.storage);
-        const received = std.posix.recvfrom(
-            self.sock,
-            &self.recv_buf,
-            std.posix.MSG.DONTWAIT,
-            @ptrCast(&addr_storage),
-            &addr_len,
-        ) catch |err| {
-            if (err == error.WouldBlock) return;
-            std.debug.print("recv error: {s}\n", .{@errorName(err)});
-            return;
-        };
-
-        const packet = network.Packet.decode(self.recv_buf[0..received]) catch |err| {
-            std.debug.print("decode error: {s}\n", .{@errorName(err)});
-            return;
-        };
+    fn handlePacket(self: *UdpClient, packet: network.Packet) !void {
         switch (packet.payload) {
             .state_update => |state| {
-                const corrected = self.reconcileState(packet.header.ack, state);
-                self.storeSnapshot(corrected);
-                return;
+                const server_pos = rl.Vector2{ .x = state.x, .y = state.y };
+                const corrected = self.state.reconcileState(packet.header.ack, server_pos, self.world);
+                self.state.storeSnapshot(corrected);
             },
-            else => return,
-        }
-    }
+            .all_players_state => |all_players| {
+                const now: i64 = @intCast(std.time.nanoTimestamp());
+                var found_self = false;
+                var moving_player = std.AutoHashMap(u32, bool).init(self.state.allocator);
+                defer moving_player.deinit();
 
-    pub fn sampleInterpolated(self: *UdpClient) ?rl.Vector2 {
-        if (self.snapshot_count == 0) return null;
-        const now: i64 = @intCast(std.time.nanoTimestamp());
-        const target = now - INTERPOLATION_DELAY_NS;
-        if (self.snapshot_count == 1 or target <= self.snapshots[0].time_ns) {
-            return self.snapshots[0].pos;
-        }
-        var idx: usize = 1;
-        while (idx < self.snapshot_count and self.snapshots[idx].time_ns < target) : (idx += 1) {}
-        if (idx == self.snapshot_count) {
-            return self.snapshots[self.snapshot_count - 1].pos;
-        }
-        const after = self.snapshots[idx];
-        const before = self.snapshots[idx - 1];
-        const span = after.time_ns - before.time_ns;
-        if (span <= 0) return after.pos;
-        const t = @as(f32, @floatFromInt(target - before.time_ns)) / @as(f32, @floatFromInt(span));
-        return rl.Vector2{
-            .x = lerp(before.pos.x, after.pos.x, std.math.clamp(t, 0.0, 1.0)),
-            .y = lerp(before.pos.y, after.pos.y, std.math.clamp(t, 0.0, 1.0)),
-        };
-    }
+                for (all_players.players[0..all_players.count]) |player_info| {
+                    if (player_info.session_id == self.session_id) {
+                        // This is our own position from the server - use for reconciliation
+                        const server_pos = rl.Vector2{ .x = player_info.x, .y = player_info.y };
+                        const corrected = self.state.reconcileState(packet.header.ack, server_pos, self.world);
+                        self.state.storeSnapshot(corrected);
+                        found_self = true;
+                    } else {
+                        // Other player
+                        // Let's read previous state first
+                        var dir: MoveDirection = .Down;
+                        var is_moving = false;
 
-    fn reconcileState(self: *UdpClient, ack: u32, state: network.StatePayload) rl.Vector2 {
-        self.dropAcknowledged(ack);
-        var corrected = rl.Vector2{ .x = state.x, .y = state.y };
-        var idx: usize = 0;
-        while (idx < self.pending_count) : (idx += 1) {
-            const entry = self.pending_moves[idx];
-            applyMoveToVector(&corrected, entry.cmd);
-        }
-        return corrected;
-    }
+                        if (self.state.getOtherPlayer(player_info.session_id)) |prev| {
+                            const dx = player_info.x - prev.pos.x;
+                            const dy = player_info.y - prev.pos.y;
+                            const movement_threshold: f32 = 0.25;
+                            const stale_ns: i64 = 250_000_000; // 250ms
+                            const fresh_update = (now - prev.last_update_ns) < stale_ns;
+                            const moved_enough = (@abs(dx) > movement_threshold) or (@abs(dy) > movement_threshold);
 
-    fn dropAcknowledged(self: *UdpClient, ack: u32) void {
-        var idx: usize = 0;
-        while (idx < self.pending_count) {
-            if (self.pending_moves[idx].seq <= ack) {
-                var shift_idx = idx;
-                while (shift_idx + 1 < self.pending_count) : (shift_idx += 1) {
-                    self.pending_moves[shift_idx] = self.pending_moves[shift_idx + 1];
+                            is_moving = fresh_update and moved_enough;
+
+                            if (is_moving) {
+                                try moving_player.put(player_info.session_id, true);
+                                if (@abs(dx) > @abs(dy)) {
+                                    dir = if (dx > 0) .Right else .Left;
+                                } else {
+                                    dir = if (dy > 0) .Down else .Up;
+                                }
+                            } else {
+                                dir = prev.dir;
+                            }
+                        }
+
+                        try self.state.updateOtherPlayer(player_info.session_id, .{ .x = player_info.x, .y = player_info.y }, dir, is_moving);
+                    }
                 }
-                self.pending_count -= 1;
-            } else {
-                idx += 1;
-            }
+
+                var it = self.state.other_players.iterator();
+                while (it.next()) |entry| {
+                    if (moving_player.contains(entry.key_ptr.*)) continue;
+                    entry.value_ptr.is_moving = false;
+                }
+
+                // If we didn't find ourselves, we might have just connected
+                if (!found_self) {
+                    std.debug.print("Warning: own session_id {d} not in all_players_state\n", .{self.session_id});
+                }
+            },
+            else => {},
         }
     }
 
-    fn recordPending(self: *UdpClient, entry: PendingMove) void {
-        if (self.pending_count == MAX_PENDING_MOVES) {
-            var i: usize = 0;
-            while (i + 1 < self.pending_count) : (i += 1) {
-                self.pending_moves[i] = self.pending_moves[i + 1];
-            }
-            self.pending_count -= 1;
-        }
-        self.pending_moves[self.pending_count] = entry;
-        self.pending_count += 1;
-    }
-
-    fn storeSnapshot(self: *UdpClient, pos: rl.Vector2) void {
-        if (self.snapshot_count == MAX_SNAPSHOTS) {
-            var i: usize = 0;
-            while (i + 1 < self.snapshot_count) : (i += 1) {
-                self.snapshots[i] = self.snapshots[i + 1];
-            }
-            self.snapshot_count -= 1;
-        }
-        self.snapshots[self.snapshot_count] = .{
-            .time_ns = @intCast(std.time.nanoTimestamp()),
-            .pos = pos,
+    pub fn sendPing(self: *UdpClient) !void {
+        var buf: [128]u8 = undefined;
+        var packet = network.Packet{
+            .header = .{
+                .msg_type = .ping,
+                .session_id = self.session_id,
+                .payload_len = @intCast(PingPayload.size()),
+            },
+            .payload = .{ .ping = .{ .timestamp = @intCast(std.time.milliTimestamp()) } },
         };
-        self.snapshot_count += 1;
+        try packet.encode(&buf);
+        const len = network.packet_header_size + packet.header.payload_len;
+        _ = try std.posix.sendto(self.sock, buf[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
     }
 };
 
-pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand) void {
+pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand, world: shared.World) void {
+    const move_amount = move.speed * move.delta;
+
+    var new_pos = pos.*;
     switch (move.direction) {
-        .Up => pos.y -= move.speed * move.delta,
-        .Down => pos.y += move.speed * move.delta,
-        .Left => pos.x -= move.speed * move.delta,
-        .Right => pos.x += move.speed * move.delta,
+        .Up => new_pos.y -= move_amount,
+        .Down => new_pos.y += move_amount,
+        .Left => new_pos.x -= move_amount,
+        .Right => new_pos.x += move_amount,
     }
-    pos.x = std.math.clamp(pos.x, 0.0, SERVER_MAX_POS);
-    pos.y = std.math.clamp(pos.y, 0.0, SERVER_MAX_POS);
+
+    // Clamp to world bounds
+    new_pos.x = std.math.clamp(new_pos.x, 0.0, world.width);
+    new_pos.y = std.math.clamp(new_pos.y, 0.0, world.height);
+
+    // Check collision at new position (check leading corners)
+    const PLAYER_SIZE: f32 = 32.0; // Must match main.zig
+    const collision = world.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
+
+    // Only apply movement if no collision
+    if (!collision) {
+        pos.* = new_pos;
+    }
 }
 
 fn lerp(a: f32, b: f32, t: f32) f32 {

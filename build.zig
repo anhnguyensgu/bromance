@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{ .{ .name = "shared", .module = shared_mod } },
+        .imports = &.{.{ .name = "shared", .module = shared_mod }},
     });
 
     const exe = b.addExecutable(.{
@@ -52,11 +52,27 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/server_main.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{ .{ .name = "shared", .module = shared_mod } },
+        .imports = &.{.{ .name = "shared", .module = shared_mod }},
     });
     const server_exe = b.addExecutable(.{ .name = "zig-server", .root_module = server_mod });
     b.installArtifact(server_exe);
     const run_server = b.addRunArtifact(server_exe);
     run_server.step.dependOn(b.getInstallStep());
     b.step("run-server", "Run the zig server").dependOn(&run_server.step);
+
+    // Tiles Test executable
+    const tiles_mod = b.addModule("zig_tiles_root", .{
+        .root_source_file = b.path("src/tiles_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "shared", .module = shared_mod }},
+    });
+    const tiles_exe = b.addExecutable(.{ .name = "tiles-test", .root_module = tiles_mod });
+    tiles_exe.linkLibrary(raylib_artifact);
+    tiles_exe.root_module.addImport("raylib", raylib);
+    tiles_exe.root_module.addImport("raygui", raygui);
+    b.installArtifact(tiles_exe);
+    const run_tiles = b.addRunArtifact(tiles_exe);
+    run_tiles.step.dependOn(b.getInstallStep());
+    b.step("run-tiles", "Run the tiles test app").dependOn(&run_tiles.step);
 }
