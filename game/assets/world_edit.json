@@ -1,0 +1,374 @@
+{
+  "world": {
+    "width": 192,
+    "height": 320,
+    "tiles_x": 12,
+    "tiles_y": 20
+  },
+  "tiles": [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 3, 3, 3, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 3, 0, 3, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 3, 3, 3, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  ],
+  "buildings": [
+    {
+      "type": "Townhall",
+      "tile_x": 2,
+      "tile_y": 2,
+      "width_tiles": 5,
+      "height_tiles": 4,
+      "sprite_width": 192,
+      "sprite_height": 170
+    },
+    {
+      "type": "Lake",
+      "tile_x": 2,
+      "tile_y": 8,
+      "width_tiles": 5,
+      "height_tiles": 4,
+      "sprite_width": 240,
+      "sprite_height": 200
+    },
+    {
+      "type": "House",
+      "tile_x": 8,
+      "tile_y": 8,
+      "width_tiles": 4,
+      "height_tiles": 4,
+      "sprite_width": 4,
+      "sprite_height": 4
+    },
+    {
+      "type": "Road",
+      "tile_x": 7,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 8,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 9,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 10,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 11,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 12,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 13,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 14,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 15,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 16,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 17,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 18,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 19,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 20,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 21,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 22,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 23,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 24,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 3,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 4,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 5,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 6,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 7,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 8,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 9,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 10,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 11,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 12,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 13,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 14,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 15,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 16,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 17,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 18,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    },
+    {
+      "type": "Road",
+      "tile_x": 25,
+      "tile_y": 19,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_width": 50,
+      "sprite_height": 50
+    }
+  ]
+}
