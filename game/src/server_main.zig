@@ -52,16 +52,8 @@ const UdpEchoServer = struct {
 
     pub fn run(self: *UdpEchoServer) !void {
         while (true) {
-            try self.handleOnce();
+            try self.handleOnceInternal(0);
         }
-    }
-
-    pub fn handleOnce(self: *UdpEchoServer) !void {
-        try self.handleOnceInternal(0);
-    }
-
-    fn handleOnceNonBlocking(self: *UdpEchoServer) !void {
-        try self.handleOnceInternal(posix.MSG.DONTWAIT);
     }
 
     fn handleOnceInternal(self: *UdpEchoServer, recv_flags: i32) !void {
