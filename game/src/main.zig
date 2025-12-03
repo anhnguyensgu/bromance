@@ -345,11 +345,10 @@ pub fn runRaylib() anyerror!void {
         drawConstruction(townhall_texture, lake_texture, terrain_texture, ruins_texture, world);
 
         // Draw other players with animation
+        // Uses double-buffered state - lock-free read from the active buffer
         {
-            game_state.mutex.lock();
-            defer game_state.mutex.unlock();
-
-            var it = game_state.other_players.iterator();
+            const other_players = game_state.getOtherPlayersForRender();
+            var it = other_players.iterator();
             while (it.next()) |entry| {
                 const other_player = entry.value_ptr.*;
 

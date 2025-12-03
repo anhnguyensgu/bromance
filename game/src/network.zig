@@ -14,6 +14,7 @@ pub const PacketType = enum(u8) {
     move = 2,
     state_update = 3,
     all_players_state = 4,
+    leave = 5,
 };
 
 pub const StatePayload = struct {
@@ -107,11 +108,31 @@ pub const AllPlayersPayload = struct {
     }
 };
 
+pub const LeavePayload = struct {
+    reason: u8, // 0 = normal disconnect, 1 = timeout, etc.
+
+    pub fn size() usize {
+        return 1;
+    }
+
+    pub fn encode(self: LeavePayload, dest: []u8) ![]u8 {
+        if (dest.len < size()) return error.BufferTooSmall;
+        dest[0] = self.reason;
+        return dest[0..size()];
+    }
+
+    pub fn decode(buf: []const u8) !LeavePayload {
+        if (buf.len < size()) return error.BufferTooSmall;
+        return .{ .reason = buf[0] };
+    }
+};
+
 pub const PacketPayload = union(PacketType) {
     ping: PingPayload,
     move: MovePayload,
     state_update: StatePayload,
     all_players_state: AllPlayersPayload,
+    leave: LeavePayload,
     const Self = @This();
 
     pub fn decodePayload(header: *const PacketHeader, payload: []const u8) !Self {
@@ -120,6 +141,7 @@ pub const PacketPayload = union(PacketType) {
             .move => return .{ .move = try decodeGenericPayload(MovePayload, payload) },
             .state_update => return .{ .state_update = try decodeGenericPayload(StatePayload, payload) },
             .all_players_state => return .{ .all_players_state = try decodeGenericPayload(AllPlayersPayload, payload) },
+            .leave => return .{ .leave = try decodeGenericPayload(LeavePayload, payload) },
         }
     }
 
@@ -129,6 +151,7 @@ pub const PacketPayload = union(PacketType) {
             .move => |b| return try encodeGenericPayload(MovePayload, b),
             .state_update => |b| return try encodeGenericPayload(StatePayload, b),
             .all_players_state => |b| return try encodeGenericPayload(AllPlayersPayload, b),
+            .leave => |b| return try encodeGenericPayload(LeavePayload, b),
         }
     }
 };
@@ -286,6 +309,11 @@ pub const Packet = struct {
             .all_players_state => |payload_players| {
                 var tmp: [AllPlayersPayload.size()]u8 = undefined;
                 const encoded = try payload_players.encode(&tmp);
+                std.mem.copyForwards(u8, body_slice, encoded);
+            },
+            .leave => |payload_leave| {
+                var tmp: [LeavePayload.size()]u8 = undefined;
+                const encoded = try payload_leave.encode(&tmp);
                 std.mem.copyForwards(u8, body_slice, encoded);
             },
         }

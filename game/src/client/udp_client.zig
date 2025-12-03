@@ -8,40 +8,20 @@ const shared = @import("../shared.zig");
 const network = shared.network;
 const ClientGameState = @import("game_state.zig").ClientGameState;
 
-const MAX_PENDING_MOVES: usize = 32;
-const MAX_SNAPSHOTS: usize = 32;
-const INTERPOLATION_DELAY_NS: i64 = 45_000_000;
-
-const PendingMove = struct {
-    seq: u32,
-    cmd: MovementCommand,
-};
-
-const Snapshot = struct {
-    time_ns: i64,
-    pos: rl.Vector2,
-};
-
-pub const OtherPlayerState = struct {
-    pos: rl.Vector2,
-    last_update_ns: i64,
-    dir: MoveDirection = .Down, // Track facing direction for animation
-    is_moving: bool = false, // Track if player is currently moving
-};
+// Heartbeat interval - must be less than server's CLIENT_TIMEOUT (30s)
+const HEARTBEAT_INTERVAL_NS: i64 = 10 * std.time.ns_per_s; // 10 seconds
 
 pub const UdpClient = struct {
     sock: std.posix.socket_t,
     server_addr: std.net.Address,
-    recv_buf: [2048]u8 = undefined, // Increased for all_players_state packets
+    recv_buf: [2048]u8 = undefined,
 
     state: *ClientGameState,
     running: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
 
-    // We need session_id back
     session_id: u32 = 0,
-
-    // We need world for reconciliation
     world: shared.World,
+    last_ping_ns: i64 = 0,
 
     pub fn init(state: *ClientGameState, world: shared.World, config: struct { server_ip: []const u8, server_port: u16 }) !UdpClient {
         const sock = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM | std.posix.SOCK.NONBLOCK, 0);
@@ -53,7 +33,7 @@ pub const UdpClient = struct {
             .sock = sock,
             .server_addr = addr,
             .state = state,
-            .session_id = state.session_id, // Get session_id from ClientGameState
+            .session_id = state.session_id,
             .world = world,
         };
     }
@@ -68,8 +48,11 @@ pub const UdpClient = struct {
 
         // Initial ping
         try self.sendPing();
+        self.last_ping_ns = @intCast(std.time.nanoTimestamp());
 
         while (self.running.load(.acquire)) {
+            const now: i64 = @intCast(std.time.nanoTimestamp());
+
             // 1. Receive Packets
             var addr_storage: std.posix.sockaddr.storage = undefined;
             var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr.storage);
@@ -77,7 +60,7 @@ pub const UdpClient = struct {
             const received = std.posix.recvfrom(
                 self.sock,
                 &self.recv_buf,
-                0, // No flags needed if socket is non-blocking
+                0,
                 @ptrCast(&addr_storage),
                 &addr_len,
             ) catch |err| blk: {
@@ -93,16 +76,14 @@ pub const UdpClient = struct {
             }
 
             // 2. Send Pending Moves
-            // We need to peek at the latest move to send
             if (self.state.getLatestMove()) |move| {
-                // Send move packet
                 var packet = network.Packet{
                     .header = .{
                         .msg_type = .move,
                         .flags = .{ .reliable = true },
                         .sequence = move.seq,
                         .session_id = self.session_id,
-                        .ack = 0, // Server will fill this
+                        .ack = 0,
                         .payload_len = @intCast(MovementCommand.size()),
                     },
                     .payload = .{ .move = move.cmd },
@@ -113,10 +94,16 @@ pub const UdpClient = struct {
                 _ = try std.posix.sendto(self.sock, buf[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
             }
 
-            // Sleep a bit to avoid burning CPU (1ms)
+            // 3. Send heartbeat ping to keep connection alive (even when idle)
+            if (now - self.last_ping_ns > HEARTBEAT_INTERVAL_NS) {
+                try self.sendPing();
+                self.last_ping_ns = now;
+            }
+
             // Sleep a bit to avoid burning CPU (1ms)
             std.posix.nanosleep(0, 1_000_000);
         }
+        // try self.sendLeave();
     }
 
     fn handlePacket(self: *UdpClient, packet: network.Packet) !void {
@@ -127,60 +114,13 @@ pub const UdpClient = struct {
                 self.state.storeSnapshot(corrected);
             },
             .all_players_state => |all_players| {
-                const now: i64 = @intCast(std.time.nanoTimestamp());
-                var found_self = false;
-                var moving_player = std.AutoHashMap(u32, bool).init(self.state.allocator);
-                defer moving_player.deinit();
-
-                for (all_players.players[0..all_players.count]) |player_info| {
-                    if (player_info.session_id == self.session_id) {
-                        // This is our own position from the server - use for reconciliation
-                        const server_pos = rl.Vector2{ .x = player_info.x, .y = player_info.y };
-                        const corrected = self.state.reconcileState(packet.header.ack, server_pos, self.world);
-                        self.state.storeSnapshot(corrected);
-                        found_self = true;
-                    } else {
-                        // Other player
-                        // Let's read previous state first
-                        var dir: MoveDirection = .Down;
-                        var is_moving = false;
-
-                        if (self.state.getOtherPlayer(player_info.session_id)) |prev| {
-                            const dx = player_info.x - prev.pos.x;
-                            const dy = player_info.y - prev.pos.y;
-                            const movement_threshold: f32 = 0.25;
-                            const stale_ns: i64 = 250_000_000; // 250ms
-                            const fresh_update = (now - prev.last_update_ns) < stale_ns;
-                            const moved_enough = (@abs(dx) > movement_threshold) or (@abs(dy) > movement_threshold);
-
-                            is_moving = fresh_update and moved_enough;
-
-                            if (is_moving) {
-                                try moving_player.put(player_info.session_id, true);
-                                if (@abs(dx) > @abs(dy)) {
-                                    dir = if (dx > 0) .Right else .Left;
-                                } else {
-                                    dir = if (dy > 0) .Down else .Up;
-                                }
-                            } else {
-                                dir = prev.dir;
-                            }
-                        }
-
-                        try self.state.updateOtherPlayer(player_info.session_id, .{ .x = player_info.x, .y = player_info.y }, dir, is_moving);
-                    }
-                }
-
-                var it = self.state.other_players.iterator();
-                while (it.next()) |entry| {
-                    if (moving_player.contains(entry.key_ptr.*)) continue;
-                    entry.value_ptr.is_moving = false;
-                }
-
-                // If we didn't find ourselves, we might have just connected
-                if (!found_self) {
-                    std.debug.print("Warning: own session_id {d} not in all_players_state\n", .{self.session_id});
-                }
+                // Delegate all logic to ClientGameState - uses double buffering internally
+                try self.state.handleAllPlayersUpdate(
+                    all_players.players[0..all_players.count],
+                    self.session_id,
+                    packet.header.ack,
+                    self.world,
+                );
             },
             else => {},
         }
@@ -195,6 +135,21 @@ pub const UdpClient = struct {
                 .payload_len = @intCast(PingPayload.size()),
             },
             .payload = .{ .ping = .{ .timestamp = @intCast(std.time.milliTimestamp()) } },
+        };
+        try packet.encode(&buf);
+        const len = network.packet_header_size + packet.header.payload_len;
+        _ = try std.posix.sendto(self.sock, buf[0..len], 0, &self.server_addr.any, self.server_addr.getOsSockLen());
+    }
+
+    pub fn sendLeave(self: *UdpClient) !void {
+        var buf: [128]u8 = undefined;
+        var packet = network.Packet{
+            .header = .{
+                .msg_type = .leave,
+                .session_id = self.session_id,
+                .payload_len = @intCast(network.LeavePayload.size()),
+            },
+            .payload = .{ .leave = .{ .reason = 0 } },
         };
         try packet.encode(&buf);
         const len = network.packet_header_size + packet.header.payload_len;
@@ -217,11 +172,10 @@ pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand, world: shared.
     new_pos.x = std.math.clamp(new_pos.x, 0.0, world.width);
     new_pos.y = std.math.clamp(new_pos.y, 0.0, world.height);
 
-    // Check collision at new position (check leading corners)
-    const PLAYER_SIZE: f32 = 32.0; // Must match main.zig
+    // Check collision at new position
+    const PLAYER_SIZE: f32 = 32.0;
     const collision = world.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
 
-    // Only apply movement if no collision
     if (!collision) {
         pos.* = new_pos;
     }
