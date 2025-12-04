@@ -7,7 +7,12 @@ const network = shared.network;
 const Client = struct {
     address: std.net.Address,
     state: shared.PlayerState,
+    last_heard_ns: i64, // Track when we last received a packet from this client
 };
+
+// Housekeeping configuration
+const CLIENT_TIMEOUT_NS: i64 = 30 * std.time.ns_per_s; // 30 seconds without activity = disconnected
+const HOUSEKEEPING_INTERVAL_NS: i64 = 5 * std.time.ns_per_s; // Check every 5 seconds
 
 const UdpEchoServer = struct {
     sock: posix.socket_t,
@@ -15,6 +20,7 @@ const UdpEchoServer = struct {
     clients: std.AutoHashMap(u32, Client),
     allocator: std.mem.Allocator,
     world: shared.World,
+    last_housekeeping_ns: i64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, bind_port: u16) !UdpEchoServer {
         const listen_address = try std.net.Address.parseIp4("0.0.0.0", bind_port);
@@ -25,14 +31,22 @@ const UdpEchoServer = struct {
         try posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.REUSEPORT, std.mem.asBytes(&enable));
         try posix.bind(sock, &listen_address.any, listen_address.getOsSockLen());
 
+        // Set socket to non-blocking for housekeeping checks
+        var flags = try posix.fcntl(sock, posix.F.GETFL, 0);
+        flags |= @as(u32, @bitCast(posix.O{ .NONBLOCK = true }));
+        _ = try posix.fcntl(sock, posix.F.SETFL, flags);
+
         // Load world data for collision detection
         const world = try shared.World.loadFromFile(allocator, "assets/world.json");
+
+        const now: i64 = @intCast(std.time.nanoTimestamp());
 
         return .{
             .sock = sock,
             .clients = std.AutoHashMap(u32, Client).init(allocator),
             .allocator = allocator,
             .world = world,
+            .last_housekeeping_ns = now,
         };
     }
 
@@ -51,24 +65,34 @@ const UdpEchoServer = struct {
     }
 
     pub fn run(self: *UdpEchoServer) !void {
+        std.debug.print("Server running on port 9999...\n", .{});
+
         while (true) {
-            try self.handleOnceInternal(0);
+            // Try to receive a packet (non-blocking)
+            self.handleOnceNonBlocking() catch |err| {
+                if (err != error.WouldBlock) {
+                    std.debug.print("Error handling packet: {s}\n", .{@errorName(err)});
+                }
+            };
+
+            // Run housekeeping periodically
+            try self.runHousekeeping();
+
+            // Small sleep to avoid burning CPU when no packets
+            std.posix.nanosleep(0, 1_000_000); // 1ms
         }
     }
 
-    fn handleOnceInternal(self: *UdpEchoServer, recv_flags: i32) !void {
+    fn handleOnceNonBlocking(self: *UdpEchoServer) !void {
         var client_addr_storage: posix.sockaddr.storage = undefined;
         var client_addr_len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
-        const received = posix.recvfrom(
+        const received = try posix.recvfrom(
             self.sock,
             &self.buffer,
-            @intCast(recv_flags),
+            0,
             @ptrCast(&client_addr_storage),
             &client_addr_len,
-        ) catch |err| {
-            if (err == error.WouldBlock) return err;
-            return err;
-        };
+        );
 
         const addr = std.net.Address.initPosix(
             @ptrCast(@alignCast(&client_addr_storage)),
@@ -78,6 +102,7 @@ const UdpEchoServer = struct {
         const packet = try network.Packet.decode(payload);
         const ack_seq = packet.header.sequence;
         const session_id = packet.header.session_id;
+        const now: i64 = @intCast(std.time.nanoTimestamp());
 
         // Get or create client
         const res = try self.clients.getOrPut(session_id);
@@ -85,25 +110,74 @@ const UdpEchoServer = struct {
             res.value_ptr.* = .{
                 .address = addr,
                 .state = .{ .x = 0, .y = 0 },
+                .last_heard_ns = now,
             };
-            std.debug.print("New player connected: session_id={d}\n", .{session_id});
+            std.debug.print("New player connected: session_id={d}, total_clients={d}\n", .{ session_id, self.clients.count() });
         }
-        // Update address in case it changed (e.g. NAT)
+
+        // Update last heard time and address
+        res.value_ptr.last_heard_ns = now;
         res.value_ptr.address = addr;
         const client = res.value_ptr;
 
         switch (packet.payload) {
             .ping => |p| {
-                std.debug.print("ping payload timestamp: {d}\n", .{p.timestamp});
+                std.debug.print("ping from session_id={d}, timestamp={d}\n", .{ session_id, p.timestamp });
                 try self.broadcastAllPlayers(ack_seq);
             },
             .move => |m| {
-                // std.debug.print("move payload direction: {any}\n", .{m.direction});
                 self.integrateMove(m, &client.state);
-                // Broadcast all players to all clients (includes reconciliation data)
+                try self.broadcastAllPlayers(ack_seq);
+            },
+            .leave => |l| {
+                std.debug.print("Player leaving: session_id={d}, reason={d}\n", .{ session_id, l.reason });
+                _ = self.clients.remove(session_id);
+                std.debug.print("Player removed, total_clients={d}\n", .{self.clients.count()});
                 try self.broadcastAllPlayers(ack_seq);
             },
             .state_update, .all_players_state => {},
+        }
+    }
+
+    fn runHousekeeping(self: *UdpEchoServer) !void {
+        const now: i64 = @intCast(std.time.nanoTimestamp());
+
+        // Only run housekeeping at intervals
+        if (now - self.last_housekeeping_ns < HOUSEKEEPING_INTERVAL_NS) {
+            return;
+        }
+        self.last_housekeeping_ns = now;
+
+        // Find and remove stale clients
+        // Use a fixed-size buffer since we don't expect many stale clients per cycle
+        var stale_clients: [network.MAX_PLAYERS]u32 = undefined;
+        var stale_count: usize = 0;
+
+        var it = self.clients.iterator();
+        while (it.next()) |entry| {
+            const session_id = entry.key_ptr.*;
+            const client = entry.value_ptr.*;
+            const inactive_duration = now - client.last_heard_ns;
+
+            if (inactive_duration > CLIENT_TIMEOUT_NS) {
+                if (stale_count < network.MAX_PLAYERS) {
+                    stale_clients[stale_count] = session_id;
+                    stale_count += 1;
+                }
+                const inactive_secs = @divFloor(inactive_duration, std.time.ns_per_s);
+                std.debug.print("Client timed out: session_id={d}, inactive for {d}s\n", .{ session_id, inactive_secs });
+            }
+        }
+
+        // Remove stale clients
+        if (stale_count > 0) {
+            for (stale_clients[0..stale_count]) |session_id| {
+                _ = self.clients.remove(session_id);
+            }
+            std.debug.print("Removed {d} stale client(s), total_clients={d}\n", .{ stale_count, self.clients.count() });
+
+            // Broadcast updated player list to remaining clients
+            try self.broadcastAllPlayers(0);
         }
     }
 
@@ -125,7 +199,7 @@ const UdpEchoServer = struct {
             all_players.count += 1;
         }
 
-        // Send to all clients (each client will extract their own position for reconciliation)
+        // Send to all clients
         var dest_it = self.clients.iterator();
         while (dest_it.next()) |dest_entry| {
             const dest_client = dest_entry.value_ptr;
@@ -134,10 +208,9 @@ const UdpEchoServer = struct {
     }
 
     fn integrateMove(self: *UdpEchoServer, move: network.MovePayload, pos: *shared.PlayerState) void {
-        const PLAYER_SIZE: f32 = 32.0; // Must match client
+        const PLAYER_SIZE: f32 = 32.0;
         const move_amount = move.speed * move.delta;
 
-        // Calculate new position
         var new_pos = pos.*;
         switch (move.direction) {
             .Up => new_pos.y -= move_amount,
@@ -146,14 +219,11 @@ const UdpEchoServer = struct {
             .Right => new_pos.x += move_amount,
         }
 
-        // Clamp to world bounds
         new_pos.x = std.math.clamp(new_pos.x, 0.0, self.world.width);
         new_pos.y = std.math.clamp(new_pos.y, 0.0, self.world.height);
 
-        // Check collision
         const collision = self.world.checkBuildingCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE);
 
-        // Only apply movement if no collision
         if (!collision) {
             pos.* = new_pos;
         }
@@ -209,7 +279,11 @@ pub fn main() !void {
 }
 
 fn serverThread(server: *UdpEchoServer) void {
-    server.handleOnce() catch |err| std.debug.panic("server thread error: {s}", .{@errorName(err)});
+    server.handleOnceNonBlocking() catch |err| {
+        if (err != error.WouldBlock) {
+            std.debug.panic("server thread error: {s}", .{@errorName(err)});
+        }
+    };
 }
 
 test "udp client receives echoed ping payload from localhost server" {
