@@ -315,6 +315,57 @@ pub const AutoTileRenderer = struct {
         self.drawLayerWithOffset(layer, 0, 0, dest_tile_w, dest_tile_h);
     }
 
+    pub fn drawBackground(self: AutoTileRenderer, layer: TileLayer, offset_x: f32, offset_y: f32, dest_tile_w: f32, dest_tile_h: f32) void {
+        var ty: i32 = 0;
+        while (ty < layer.height) : (ty += 1) {
+            var tx: i32 = 0;
+            while (tx < layer.width) : (tx += 1) {
+                const config = self.configs.get(1) orelse continue;
+                var coords: [2]i32 = .{ 8, 0 };
+                if (tx == 0) {
+                    if (ty == layer.height - 1) {
+                        coords[1] += 3;
+                    } else if (ty > 0) {
+                        coords[1] += 1;
+                    }
+                } else if (tx == layer.width - 1) {
+                    if (ty == layer.height - 1) {
+                        coords[0] += 3;
+                        coords[1] += 3;
+                    } else if (ty == 0) {
+                        coords[0] += 3;
+                    } else {
+                        coords[0] += 3;
+                        coords[1] += 2;
+                    }
+                } else if (ty == 0) {
+                    coords[0] += 2;
+                } else if (ty == layer.height - 1) {
+                    coords[0] += 1;
+                    coords[1] += 3;
+                } else {
+                    coords[0] += 1;
+                    coords[1] += 2;
+                }
+                const src: rl.Rectangle = .{
+                    .x = @floatFromInt(coords[0] * config.tile_size),
+                    .y = @floatFromInt(coords[1] * config.tile_size),
+                    .width = @floatFromInt(config.tile_size),
+                    .height = @floatFromInt(config.tile_size),
+                };
+
+                const dest = rl.Rectangle{
+                    .x = offset_x + @as(f32, @floatFromInt(tx)) * dest_tile_w,
+                    .y = offset_y + @as(f32, @floatFromInt(ty)) * dest_tile_h,
+                    .width = dest_tile_w,
+                    .height = dest_tile_h,
+                };
+
+                rl.drawTexturePro(self.texture, src, dest, .{ .x = 0, .y = 0 }, 0, .white);
+            }
+        }
+    }
+
     /// Draw a tile layer with world offset
     pub fn drawLayerWithOffset(self: AutoTileRenderer, layer: TileLayer, offset_x: f32, offset_y: f32, dest_tile_w: f32, dest_tile_h: f32) void {
         var ty: i32 = 0;

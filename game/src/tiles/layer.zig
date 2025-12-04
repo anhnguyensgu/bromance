@@ -99,8 +99,12 @@ pub const MultiLayerTileMap = struct {
         self.drawWithOffset(0, 0, tile_w, tile_h);
     }
 
+    pub fn drawBackground(self: MultiLayerTileMap, tile_w: f32, tile_h: f32) void {
+        self.renderer.drawBackground(self.background, 0, 0, tile_w, tile_h);
+    }
+
     pub fn drawWithOffset(self: MultiLayerTileMap, offset_x: f32, offset_y: f32, tile_w: f32, tile_h: f32) void {
-        self.renderer.drawLayerWithOffset(self.background, offset_x, offset_y, tile_w, tile_h);
+        self.renderer.drawBackground(self.background, offset_x, offset_y, tile_w, tile_h);
         // self.renderer.drawLayerWithOffset(self.terrain, offset_x, offset_y, tile_w, tile_h);
         // self.renderer.drawLayerWithOffset(self.paths, offset_x, offset_y, tile_w, tile_h);
     }
