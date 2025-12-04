@@ -1,7 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
 const autotile = @import("autotile.zig");
-const shared = @import("shared");
 
 pub const TileLayer = autotile.TileLayer;
 pub const AutoTileConfig = autotile.AutoTileConfig;
@@ -133,9 +132,9 @@ pub const MultiLayerTileMap = struct {
         };
     }
 
-    /// Create a tile map from a loaded World (shared.World).
+    /// Create a tile map from a loaded World.
     /// Uses World's optional tiles grid for background; terrain/paths are empty.
-    pub fn initFromWorld(allocator: std.mem.Allocator, texture: rl.Texture2D, world: shared.World) !MultiLayerTileMap {
+    pub fn initFromWorld(allocator: std.mem.Allocator, texture: rl.Texture2D, world: anytype) !MultiLayerTileMap {
         var renderer = AutoTileRenderer.init(allocator, texture);
 
         // Register terrain configs

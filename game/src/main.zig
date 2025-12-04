@@ -13,6 +13,8 @@ const command = @import("movement/command.zig");
 const MovementCommand = @import("movement/command.zig").MovementCommand;
 const MoveDirection = command.MoveDirection;
 const shared = @import("shared.zig");
+const tiles = @import("tiles/layer.zig");
+const MultiLayerTileMap = tiles.MultiLayerTileMap;
 
 fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
     const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;
@@ -235,6 +237,14 @@ pub fn runRaylib() anyerror!void {
         rl.unloadTexture(assets.walk_right);
         rl.unloadTexture(assets.shadow);
     }
+    // Load tileset for auto-tile system (like tile_inspector.zig)
+    var tileset_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Tileset/Tileset Spring.png");
+    // Apply color keying for transparency (Black -> Transparent)
+    rl.imageColorReplace(&tileset_img, rl.Color.black, rl.Color.blank);
+    defer rl.unloadImage(tileset_img);
+    const tileset_texture = try rl.loadTextureFromImage(tileset_img);
+    defer rl.unloadTexture(tileset_texture);
+
     const terrain_img = try rl.loadImage("assets/terrain_sprites.png");
     defer rl.unloadImage(terrain_img);
     const terrain_texture = try rl.loadTextureFromImage(terrain_img);
@@ -273,6 +283,10 @@ pub fn runRaylib() anyerror!void {
     };
     const minimap = try rl.loadRenderTexture(MINIMAP_SIZE, MINIMAP_SIZE);
     defer rl.unloadRenderTexture(minimap);
+
+    // Initialize auto-tile map from loaded world (like tile_inspector.zig)
+    var auto_tile_map = try MultiLayerTileMap.initFromWorld(allocator, tileset_texture, world);
+    defer auto_tile_map.deinit();
 
     // Initialize Game State
     var game_state = ClientGameState.init(allocator);
@@ -338,8 +352,10 @@ pub fn runRaylib() anyerror!void {
 
         rl.beginMode2D(camera);
 
-        // Draw World
-        drawWorldTiles(terrain_texture, world);
+        // Draw World using auto-tile system (like tile_inspector.zig)
+        const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
+        const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
+        auto_tile_map.draw(tile_w, tile_h);
 
         // Draw all buildings from map configuration
         drawConstruction(townhall_texture, lake_texture, terrain_texture, ruins_texture, world);

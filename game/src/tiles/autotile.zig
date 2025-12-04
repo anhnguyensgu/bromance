@@ -1,6 +1,5 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("shared");
 
 /// 4-bit bitmask for cardinal neighbors:
 /// - Bit 0 (1): North has same terrain
@@ -192,10 +191,10 @@ pub const TileLayer = struct {
         return layer;
     }
 
-    /// Initialize a tile layer from a loaded World (shared.World).
+    /// Initialize a tile layer from a loaded World.
     /// Uses the World's optional tiles grid if present; otherwise creates an empty layer.
     /// Mapping: 0/other -> GRASS(1), 2 -> ROAD(2), 3 -> WATER(3)
-    pub fn initFromWorld(allocator: std.mem.Allocator, world: shared.World) !TileLayer {
+    pub fn initFromWorld(allocator: std.mem.Allocator, world: anytype) !TileLayer {
         if (world.tiles.len == 0 or world.tile_grid_x == 0 or world.tile_grid_y == 0) {
             return TileLayer.init(allocator, world.tiles_x, world.tiles_y);
         }
