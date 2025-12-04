@@ -2,25 +2,13 @@ const std = @import("std");
 const rl = @import("raylib");
 const shared = @import("shared");
 
-const AutoTileManager = struct {
-    texture: rl.Texture2D,
-    terrain: TerrainTileData,
-};
-
-const TerrainTileData = union(shared.TerrainType) {
-    Grass: TerrainTile,
-    Rock: TerrainTile,
-    Water: TerrainTile,
-    Road: TerrainTile,
-};
-
-//contain fragment to draw a terrain tile
-const TerrainTile = struct {
-    path_start_x: i32,
-    path_start_y: i32,
-    width: i32,
-    height: i32,
-};
+// Import the new auto-tile system
+const tiles = @import("tiles/layer.zig");
+const TileLayer = tiles.TileLayer;
+const AutoTileConfig = tiles.AutoTileConfig;
+const AutoTileRenderer = tiles.AutoTileRenderer;
+const Terrain = tiles.Terrain;
+const MultiLayerTileMap = tiles.MultiLayerTileMap;
 
 fn tileRect(gridX: i32, gridY: i32, tileSize: i32) rl.Rectangle {
     return rl.Rectangle{
@@ -237,13 +225,13 @@ pub fn main() !void {
     world.tiles_x = @divTrunc(@as(i32, @intFromFloat(world.width)), 16);
     world.tiles_y = @divTrunc(@as(i32, @intFromFloat(world.height)), 16);
 
-    const auto_tile_manager: AutoTileManager = .{ .texture = tileset_texture, .terrain = .{ .Grass = .{
-        .path_start_x = 8,
-        .path_start_y = 0,
-        .height = 16,
-        .width = 16,
-    } } };
-    _ = auto_tile_manager;
+    // Initialize auto-tile map from loaded world (uses world's tiles grid if present)
+    var auto_tile_map = try MultiLayerTileMap.initFromWorld(allocator, tileset_texture, world);
+    defer auto_tile_map.deinit();
+
+    // Optionally draw additional paths/terrain using auto_tile_map.* APIs if desired
+
+    var use_autotile = true; // Toggle between old explicit system and new auto-tile
 
     // Camera - Match Inspector Transform (Pos: 10,10, Scale: 2.0)
     var camera = rl.Camera2D{
@@ -267,17 +255,30 @@ pub fn main() !void {
             if (camera.zoom < 0.1) camera.zoom = 0.1;
         }
 
+        // Toggle auto-tile mode with TAB
+        if (rl.isKeyPressed(.tab)) {
+            use_autotile = !use_autotile;
+        }
+
         rl.beginDrawing();
         defer rl.endDrawing();
 
         rl.clearBackground(rl.Color.ray_white);
 
         rl.beginMode2D(camera);
-        // Draw the raw tileset first as a background reference
+        // Draw the raw tileset first as a background reference (to the right)
         rl.drawTexture(tileset_texture, @as(i32, @intFromFloat(world.width)), 0, .white);
 
-        // Draw the autotiled world on top
-        drawWorldTiles(tileset_texture, world);
+        // Draw the world tiles
+        if (use_autotile) {
+            // NEW: Auto-tile system - automatically selects correct sprite based on neighbors
+            const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
+            const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
+            auto_tile_map.draw(tile_w, tile_h);
+        } else {
+            // OLD: Explicit TileKind system (manual sprite selection)
+            drawWorldTiles(tileset_texture, world);
+        }
         rl.endMode2D();
 
         // Inspector Overlay Logic (Grid & Hover) - Now in World Space (mostly)
@@ -327,6 +328,10 @@ pub fn main() !void {
         }
 
         rl.drawFPS(screen_width - 80, 10);
+
+        // Show current mode and controls
+        const mode_text = if (use_autotile) "Mode: AUTO-TILE (TAB to switch)" else "Mode: EXPLICIT (TAB to switch)";
+        rl.drawText(mode_text, 10, 10, 20, rl.Color.dark_blue);
         rl.drawText("Use Arrow Keys to Move Camera, Mouse Wheel to Zoom", 10, screen_height - 30, 20, rl.Color.dark_gray);
     }
 }

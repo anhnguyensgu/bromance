@@ -1,8 +1,10 @@
 const std = @import("std");
 
-const command = @import("movement/command.zig");
-const MovementCommand = command.MovementCommand;
+pub const command = @import("movement/command.zig");
+pub const MovementCommand = command.MovementCommand;
+pub const MoveDirection = command.MoveDirection;
 pub const network = @import("network.zig");
+pub const PingPayload = network.PingPayload;
 
 pub const PlayerState = struct {
     x: f32,
@@ -61,6 +63,11 @@ pub const World = struct {
     height: f32,
     tiles_x: i32,
     tiles_y: i32,
+    /// Optional logical tiles grid (flattened row-major). Present for world_edit.json.
+    tiles: []const u8 = &[_]u8{},
+    /// Dimensions of the optional tiles grid above.
+    tile_grid_x: i32 = 0,
+    tile_grid_y: i32 = 0,
     buildings: []Building,
 
     pub fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !World {
@@ -133,6 +140,31 @@ pub const World = struct {
             };
         }
 
+        // Optional: parse "tiles" grid (2D array) if present
+        var tiles_slice: []const u8 = &[_]u8{};
+        var tile_grid_x: i32 = 0;
+        var tile_grid_y: i32 = 0;
+        if (root.get("tiles")) |tiles_val| {
+            const rows = tiles_val.array;
+            tile_grid_y = @as(i32, @intCast(rows.items.len));
+            if (tile_grid_y > 0) {
+                const row0 = rows.items[0].array;
+                tile_grid_x = @as(i32, @intCast(row0.items.len));
+                const total = @as(usize, @intCast(tile_grid_x * tile_grid_y));
+                var flat = try allocator.alloc(u8, total);
+                errdefer allocator.free(flat);
+                var iy: i32 = 0;
+                while (iy < tile_grid_y) : (iy += 1) {
+                    const row_arr = rows.items[@intCast(iy)].array;
+                    var ix: i32 = 0;
+                    while (ix < tile_grid_x) : (ix += 1) {
+                        flat[@intCast(iy * tile_grid_x + ix)] = @as(u8, @intCast(row_arr.items[@intCast(ix)].integer));
+                    }
+                }
+                tiles_slice = flat;
+            }
+        }
+
         // Arena allocator is destroyed here, freeing buffer and parsed JSON
         return World{
             .buildings = buildings[0..],
@@ -140,11 +172,15 @@ pub const World = struct {
             .height = height,
             .tiles_x = tiles_x,
             .tiles_y = tiles_y,
+            .tile_grid_x = tile_grid_x,
+            .tile_grid_y = tile_grid_y,
+            .tiles = tiles_slice,
         };
     }
 
     pub fn deinit(self: *World, allocator: std.mem.Allocator) void {
         allocator.free(self.buildings);
+        if (self.tiles.len > 0) allocator.free(self.tiles);
     }
 
     pub fn getTileAtPosition(self: World, x: f32, y: f32) TerrainType {
