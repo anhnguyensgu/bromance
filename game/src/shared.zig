@@ -1,4 +1,8 @@
 const std = @import("std");
+pub const tiles = @import("tiles/layer.zig");
+const t = @import("tiles/terrain.zig");
+pub const landscape = @import("tiles/landscape.zig");
+const TerrainType = t.TerrainType;
 
 pub const command = @import("movement/command.zig");
 pub const MovementCommand = command.MovementCommand;
@@ -13,13 +17,6 @@ pub const PlayerState = struct {
 
 pub const CommandInput = union(enum) {
     movement: MovementCommand,
-};
-
-pub const TerrainType = enum(u8) {
-    Grass = 0,
-    Rock = 1,
-    Water = 2,
-    Road = 3,
 };
 
 const WorldError = error{
@@ -212,6 +209,7 @@ pub const World = struct {
     }
 
     pub fn isWalkable(terrain: TerrainType) bool {
+        // Grass and Road are walkable
         return terrain == .Grass or terrain == .Road;
     }
 

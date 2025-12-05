@@ -3,12 +3,20 @@ const rl = @import("raylib");
 const shared = @import("shared");
 
 // Import the new auto-tile system
-const tiles = @import("tiles/layer.zig");
+const tiles = shared.tiles;
 const TileLayer = tiles.TileLayer;
 const AutoTileConfig = tiles.AutoTileConfig;
 const AutoTileRenderer = tiles.AutoTileRenderer;
 const Terrain = tiles.Terrain;
 const MultiLayerTileMap = tiles.MultiLayerTileMap;
+
+// Shared landscape/frames types
+const landscape = shared.landscape;
+const TileDescriptor = landscape.TileDescriptor;
+const SpriteSheets = landscape.SpriteSheets;
+const LandscapeTile = landscape.LandscapeTile;
+const Frames = landscape.Frames;
+const drawLandscapeTile = landscape.drawLandscapeTile;
 
 fn tileRect(gridX: i32, gridY: i32, tileSize: i32) rl.Rectangle {
     return rl.Rectangle{
@@ -212,6 +220,18 @@ pub fn main() !void {
 
     const tileset_texture = try rl.loadTextureFromImage(tileset_img);
     defer rl.unloadTexture(tileset_texture);
+    const grass = Frames{
+        .SpringTiles = .{
+            .Grass = LandscapeTile.init(tileset_texture),
+        },
+    };
+    const dirt = Frames{
+        .SpringTiles = .{
+            .Road = LandscapeTile.init(tileset_texture),
+        },
+    };
+    _ = grass;
+    _ = dirt;
 
     // Initialize World
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
