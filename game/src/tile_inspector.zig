@@ -1,6 +1,8 @@
 const std = @import("std");
 const rl = @import("raylib");
 const shared = @import("shared");
+const Menu = shared.menu.Menu;
+const MenuItem = shared.menu.MenuItem;
 
 // Import the new auto-tile system
 const tiles = shared.tiles;
@@ -11,12 +13,10 @@ const Terrain = tiles.Terrain;
 const MultiLayerTileMap = tiles.MultiLayerTileMap;
 
 // Shared landscape/frames types
-const landscape = shared.landscape;
-const SpriteRect = landscape.SpriteRect;
-const SpriteSheets = landscape.SpriteSheets;
-const LandscapeTile = landscape.LandscapeTile;
-const Frames = landscape.Frames;
-const drawLandscapeTile = landscape.drawLandscapeTile;
+const sheets = shared.sheets;
+pub const LandscapeTile = shared.LandscapeTile;
+pub const Frames = shared.Frames;
+pub const drawLandscapeTile = shared.drawLandscapeTile;
 
 fn tileRect(gridX: i32, gridY: i32, tileSize: i32) rl.Rectangle {
     return rl.Rectangle{
@@ -246,6 +246,13 @@ fn drawWorldTiles(tileset: rl.Texture2D, world: shared.World) void {
     }
 }
 
+const TileData = struct { sprite: sheets.SpriteRect, texture: rl.Texture2D };
+
+const PlacedItem = struct {
+    data: TileData,
+    rect: rl.Rectangle,
+};
+
 pub fn main() !void {
     // Initialization
     const screen_width = 800;
@@ -267,11 +274,6 @@ pub fn main() !void {
     const grass = Frames{
         .SpringTiles = .{
             .Grass = LandscapeTile.init(tileset_texture),
-        },
-    };
-    _ = Frames{
-        .SpringTiles = .{
-            .Road = LandscapeTile.init(tileset_texture),
         },
     };
 
@@ -303,6 +305,62 @@ pub fn main() !void {
         .zoom = 1.0,
     };
 
+    //UI has spritesheet
+    var menu = try Menu.load();
+    defer menu.deinit();
+
+    const PlacementState = struct {
+        active_item: ?*const TileData = null,
+        is_placing: bool = false,
+    };
+    var placement_state = PlacementState{};
+    var active_menu_idx: ?usize = null;
+
+    var placed_items = try std.ArrayList(PlacedItem).initCapacity(allocator, 8);
+    defer placed_items.deinit(allocator);
+
+    var menu_items_list = try std.ArrayList(MenuItem).initCapacity(allocator, 12);
+    defer menu_items_list.deinit(allocator);
+
+    // Helper to add item
+    const addMenuItem = struct {
+        fn add(list: *std.ArrayList(MenuItem), alloc: std.mem.Allocator, label: [:0]const u8, sprite: sheets.SpriteRect, tex: rl.Texture2D) !void {
+            const data_ptr = try alloc.create(TileData);
+            data_ptr.* = .{ .sprite = sprite, .texture = tex };
+            try list.append(alloc, .{
+                .label = label,
+                .action = saveWorld,
+                .custom_draw = drawMenuItem,
+                .data = data_ptr,
+            });
+        }
+    }.add;
+
+    // Grass variants
+    const grass_frames = sheets.SpriteSet.SpringTileGrass(tileset_texture);
+    inline for (std.meta.fields(LandscapeTile.Dir)) |field| {
+        const dir = @field(LandscapeTile.Dir, field.name);
+        // Shorten label for menu width? Or just use "Grass"
+        // User said "grass with all diretion", maybe helpful to label them?
+        // But drawMenuItem draws label on top if no sprite? No, it draws sprite if data exists.
+        // Label is fallback. But let's set label to "Grass".
+        try addMenuItem(&menu_items_list, allocator, "Grass", grass_frames.SpringTiles.Grass.get(dir), tileset_texture);
+    }
+
+    // Road (Center only for now)
+    const road_frames = sheets.SpriteSet.SpringTileRoad(tileset_texture);
+    try addMenuItem(&menu_items_list, allocator, "Road", road_frames.SpringTiles.Road.get(.Center), tileset_texture);
+
+    // Clean up created data pointers at end of scope
+    defer {
+        for (menu_items_list.items) |item| {
+            if (item.data) |ptr| {
+                const tile_data = @as(*TileData, @ptrCast(@alignCast(@constCast(ptr))));
+                allocator.destroy(tile_data);
+            }
+        }
+    }
+
     while (!rl.windowShouldClose()) {
         // Camera Controls
         if (rl.isKeyDown(.right)) camera.target.x += 5;
@@ -322,6 +380,13 @@ pub fn main() !void {
             use_autotile = !use_autotile;
         }
 
+        // Placement Logic Inputs
+        if (rl.isKeyPressed(.escape)) {
+            placement_state.is_placing = false;
+            placement_state.active_item = null;
+            active_menu_idx = null;
+        }
+
         rl.beginDrawing();
         defer rl.endDrawing();
 
@@ -329,69 +394,73 @@ pub fn main() !void {
 
         rl.beginMode2D(camera);
         // Draw the raw tileset first as a background reference (to the right)
-        rl.drawTexture(tileset_texture, @as(i32, @intFromFloat(world.width)), 0, .white);
+        rl.drawTexture(tileset_texture, 100, 0, .white);
 
         // Draw grass background first
 
         // Draw the world tiles on top
         if (use_autotile) {
             // NEW: Auto-tile system - automatically selects correct sprite based on neighbors
-            // const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
-            // const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
-            // auto_tile_map.draw(tile_w, tile_h);
-
             drawGrassBackground(grass, world);
         } else {
             // OLD: Explicit TileKind system (manual sprite selection)
             drawWorldTiles(tileset_texture, world);
         }
+
+        // Render placed items
+        for (placed_items.items) |item| {
+            sheets.drawSpriteTo(item.data.texture, item.data.sprite, item.rect);
+        }
+
+        // Ghost Rendering & Placement
+        if (placement_state.is_placing) {
+            if (placement_state.active_item) |data| {
+                const mouse = rl.getMousePosition();
+                const world_mouse = rl.getScreenToWorld2D(mouse, camera);
+
+                // Snap to grid (16x16)
+                const col = @divFloor(@as(i32, @intFromFloat(world_mouse.x)), 16);
+                const row = @divFloor(@as(i32, @intFromFloat(world_mouse.y)), 16);
+                const snap_x = @as(f32, @floatFromInt(col)) * 16.0;
+                const snap_y = @as(f32, @floatFromInt(row)) * 16.0;
+
+                const rect = rl.Rectangle{ .x = snap_x, .y = snap_y, .width = 16, .height = 16 };
+
+                // Validity check (bounds)
+                const valid = (snap_x >= 0 and snap_y >= 0 and snap_x < world.width and snap_y < world.height);
+
+                // Colored Shadow
+                const shadow_color = if (valid) rl.Color{ .r = 0, .g = 255, .b = 0, .a = 100 } else rl.Color{ .r = 255, .g = 0, .b = 0, .a = 100 };
+                rl.drawRectangleRec(rect, shadow_color);
+
+                // Ghost Sprite (semi-transparent)
+                // We need a drawSprite variant that takes Color, or modify drawSpriteTo to accept color
+                // sheets.drawSpriteTo uses .white hardcoded.
+                // Let's manually draw for ghost to apply alpha
+                const src = rl.Rectangle{
+                    .x = data.sprite.x,
+                    .y = data.sprite.y,
+                    .width = data.sprite.width,
+                    .height = data.sprite.height,
+                };
+                rl.drawTexturePro(
+                    data.texture,
+                    src,
+                    rect,
+                    .{ .x = 0, .y = 0 },
+                    0,
+                    rl.Color{ .r = 255, .g = 255, .b = 255, .a = 150 }, // Ghost alpha
+                );
+
+                // Handle Click to Place
+                if (rl.isMouseButtonPressed(.left) and valid) {
+                    // Check if spot is free? For now just place on top
+                    placed_items.append(allocator, .{ .data = data.*, .rect = rect }) catch {};
+                }
+            }
+        }
+
         rl.endMode2D();
-
-        // Inspector Overlay Logic (Grid & Hover) - Now in World Space (mostly)
-        // Actually, since we are using a Camera, we should convert mouse to world space.
-
-        const mouse_screen = rl.getMousePosition();
-        const mouse_world = rl.getScreenToWorld2D(mouse_screen, camera);
-
-        // Draw Grid Lines (in World Space via Camera? No, easier to draw in screen space if fixed,
-        // but since we have a camera now, let's draw grid in World Space inside Mode2D)
-
-        rl.beginMode2D(camera);
-        const cols = world.tiles_x;
-        const rows = world.tiles_y;
-
-        var r: i32 = 0;
-        while (r <= rows) : (r += 1) {
-            const y = @as(f32, @floatFromInt(r * 16));
-            rl.drawLineEx(rl.Vector2{ .x = 0, .y = y }, rl.Vector2{ .x = world.width, .y = y }, 1.0 / camera.zoom, // Keep line thin
-                rl.Color.red);
-        }
-        var c: i32 = 0;
-        while (c <= cols) : (c += 1) {
-            const x = @as(f32, @floatFromInt(c * 16));
-            rl.drawLineEx(rl.Vector2{ .x = x, .y = 0 }, rl.Vector2{ .x = x, .y = world.height }, 1.0 / camera.zoom, rl.Color.red);
-        }
-
-        // Hover Highlight
-        if (mouse_world.x >= 0 and mouse_world.x < world.width and
-            mouse_world.y >= 0 and mouse_world.y < world.height)
-        {
-            const col = @divTrunc(@as(i32, @intFromFloat(mouse_world.x)), 16);
-            const row = @divTrunc(@as(i32, @intFromFloat(mouse_world.y)), 16);
-
-            rl.drawRectangleLinesEx(rl.Rectangle{ .x = @as(f32, @floatFromInt(col * 16)), .y = @as(f32, @floatFromInt(row * 16)), .width = 16, .height = 16 }, 2.0 / camera.zoom, rl.Color.yellow);
-        }
-        rl.endMode2D();
-
-        // Tooltip (Screen Space)
-        if (mouse_world.x >= 0 and mouse_world.x < world.width and
-            mouse_world.y >= 0 and mouse_world.y < world.height)
-        {
-            const col = @divTrunc(@as(i32, @intFromFloat(mouse_world.x)), 16);
-            const row = @divTrunc(@as(i32, @intFromFloat(mouse_world.y)), 16);
-            const text = rl.textFormat("Grid: %d, %d", .{ col, row });
-            rl.drawText(text, @as(i32, @intFromFloat(mouse_screen.x)) + 10, @as(i32, @intFromFloat(mouse_screen.y)) - 20, 20, rl.Color.black);
-        }
 
         rl.drawFPS(screen_width - 80, 10);
 
@@ -399,5 +468,53 @@ pub fn main() !void {
         const mode_text = if (use_autotile) "Mode: AUTO-TILE (TAB to switch)" else "Mode: EXPLICIT (TAB to switch)";
         rl.drawText(mode_text, 10, 10, 20, rl.Color.dark_blue);
         rl.drawText("Use Arrow Keys to Move Camera, Mouse Wheel to Zoom", 10, screen_height - 30, 20, rl.Color.dark_gray);
+        if (placement_state.is_placing) {
+            rl.drawText("PLACING MODE: Click to place, ESC to cancel", 10, screen_height - 50, 20, rl.Color.dark_purple);
+        }
+
+        // Draw Menu
+        menu.draw(world.width, menu_items_list.items, &active_menu_idx);
+
+        // Check if menu selection changed to update placement state
+        if (active_menu_idx) |idx| {
+            // If we have an active item, enter placement mode for it
+            // We assume idx corresponds to inspector_menu_items order
+            if (idx < menu_items_list.items.len) {
+                if (menu_items_list.items[idx].data) |data_ptr| {
+                    const tile_data = @as(*const TileData, @ptrCast(@alignCast(data_ptr)));
+                    placement_state.active_item = tile_data;
+                    placement_state.is_placing = true;
+                    // Optional: Reset active_menu_idx if we want to deselect in UI,
+                    // or keep it to show what's selected.
+                    // If we keep it, we need to make sure we don't re-trigger logic inadvertently,
+                    // but setting active_item repeatedly to same is fine.
+                }
+            }
+        } else {
+            // If menu has no selection (e.g. user toggled off?), maybe exit placement?
+            // Logic depends on `active_item` behavior in menu.zig.
+            // Currently it toggles. If it becomes null, we stop placing.
+            if (!placement_state.is_placing) {
+                // consistent state
+            }
+            // If I press ESC, I set is_placing false, should I clear active_menu_idx code-side? done above.
+        }
+    }
+}
+
+fn saveWorld() void {}
+
+fn drawMenuItem(item: *const MenuItem, rect: rl.Rectangle, active: bool, hovered: bool) void {
+    if (active or hovered) {
+        rl.drawRectangleRec(rect, rl.Color.sky_blue);
+    }
+
+    if (item.data) |data| {
+        const tile_data = @as(*const TileData, @ptrCast(@alignCast(data)));
+        sheets.drawSpriteTo(tile_data.texture, tile_data.sprite, rect);
+    } else {
+        const text_x = @as(i32, @intFromFloat(rect.x + 10));
+        const text_y = @as(i32, @intFromFloat(rect.y + (rect.height - 20) / 2));
+        rl.drawText(item.label, text_x, text_y, 20, if (active) rl.Color.white else rl.Color.black);
     }
 }

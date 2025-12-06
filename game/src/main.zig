@@ -478,7 +478,7 @@ pub fn runRaylib() anyerror!void {
         try player.draw(assets);
         rl.endMode2D();
 
-        top_menu.draw(screen_width, main_menu_items[0..], &active_menu_item);
+        top_menu.draw(200, main_menu_items[0..], &active_menu_item);
 
         // Draw left sidebar overlay
         // if (sidebar_opened) {

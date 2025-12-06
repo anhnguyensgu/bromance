@@ -1,47 +1,8 @@
-const std = @import("std");
 const rl = @import("raylib");
-const terrain = @import("./terrain.zig");
-const TerrainType = terrain.TerrainType;
-
-/// Simple descriptor for a sub-rectangle in a spritesheet.
-pub const SpriteRect = struct {
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-};
-
-/// Draw a sprite from a texture at the given position.
-pub fn drawSprite(texture: rl.Texture2D, sprite: SpriteRect, x: f32, y: f32) void {
-    const src = rl.Rectangle{
-        .x = sprite.x,
-        .y = sprite.y,
-        .width = sprite.width,
-        .height = sprite.height,
-    };
-
-    const dest = rl.Rectangle{
-        .x = x,
-        .y = y,
-        .width = sprite.width,
-        .height = sprite.height,
-    };
-
-    rl.drawTexturePro(
-        texture,
-        src,
-        dest,
-        .{ .x = 0, .y = 0 },
-        0,
-        .white,
-    );
-}
-
-/// Identify which sprite sheet set a Frames value belongs to.
-/// For now we only have SpringTiles, but this can be extended.
-pub const SpriteSheets = enum {
-    SpringTiles,
-};
+const sheets = @import("sheets.zig");
+const Frames = sheets.SpriteSet;
+const drawSprite = sheets.drawSprite;
+const SpriteRect = sheets.SpriteRect;
 
 /// A logical 3x3 block of landscape tiles (e.g. auto-tiling variants).
 pub const LandscapeTile = struct {
@@ -101,48 +62,23 @@ pub const LandscapeTile = struct {
     }
 };
 
-/// A tagged union of available sprite-sheet groups and terrain types.
-///
-/// Example:
-///   var grass_frames = Frames.SpringTileGrass(tileset_texture);
-///   drawLandscapeTile(grass_frames, 0, 0);
-pub const Frames = union(SpriteSheets) {
-    SpringTiles: union(TerrainType) {
-        Grass: LandscapeTile,
-        Rock: LandscapeTile,
-        Water: LandscapeTile,
-        Road: LandscapeTile,
-    },
-
-    /// Convenience constructor for a spring grass 3x3 tile block.
-    pub fn SpringTileGrass(tileset_texture: rl.Texture2D) Frames {
-        return .{ .SpringTiles = .{
-            .Grass = LandscapeTile.init(tileset_texture),
-        } };
-    }
-
-    /// Convenience constructor for a spring road 3x3 tile block.
-    pub fn SpringTileRoad(tileset_texture: rl.Texture2D) Frames {
-        return .{ .SpringTiles = .{
-            .Road = LandscapeTile.init(tileset_texture),
-        } };
-    }
-};
-
 /// Draw a landscape tile selected from a Frames value at the given position.
 ///
 /// The `dir` parameter specifies which part of the 3x3 tile block to draw
 /// (e.g., Center for full tiles, TopLeftCorner for corners, etc.)
 pub fn drawLandscapeTile(d: Frames, dir: LandscapeTile.Dir, x: f32, y: f32) void {
-    const tile: LandscapeTile = switch (d) {
-        .SpringTiles => |t| switch (t) {
-            .Grass => |tile| tile,
-            .Road => |tile| tile,
-            .Rock => |tile| tile,
-            .Water => |tile| tile,
+    switch (d) {
+        .SpringTiles => |t| {
+            const tile: LandscapeTile = switch (t) {
+                .Grass => |lt| lt,
+                .Road => |lt| lt,
+                .Rock => |lt| lt,
+                .Water => |lt| lt,
+            };
+            const sprite = tile.get(dir);
+            drawSprite(tile.texture2D, sprite, x, y);
         },
-    };
-
-    const sprite = tile.get(dir);
-    drawSprite(tile.texture2D, sprite, x, y);
+        // Only tile sprites are valid for landscape drawing.
+        else => return,
+    }
 }
