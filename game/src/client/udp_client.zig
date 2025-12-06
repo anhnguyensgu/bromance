@@ -44,6 +44,7 @@ pub const UdpClient = struct {
     }
 
     pub fn run(self: *UdpClient) !void {
+        defer self.sendLeave() catch {};
         var buf: [network.packet_header_size + network.max_payload_size]u8 = undefined;
 
         // Initial ping
@@ -103,7 +104,6 @@ pub const UdpClient = struct {
             // Sleep a bit to avoid burning CPU (1ms)
             std.posix.nanosleep(0, 1_000_000);
         }
-        // try self.sendLeave();
     }
 
     fn handlePacket(self: *UdpClient, packet: network.Packet) !void {

@@ -12,7 +12,7 @@ const MultiLayerTileMap = tiles.MultiLayerTileMap;
 
 // Shared landscape/frames types
 const landscape = shared.landscape;
-const TileDescriptor = landscape.TileDescriptor;
+const SpriteRect = landscape.SpriteRect;
 const SpriteSheets = landscape.SpriteSheets;
 const LandscapeTile = landscape.LandscapeTile;
 const Frames = landscape.Frames;
@@ -175,6 +175,50 @@ fn getTileKindAtGrid(world: shared.World, tx: i32, ty: i32) TileKind {
 
 // No bitmasking in this inspector anymore – everything is explicit.
 
+fn drawGrassBackground(grass: Frames, world: shared.World) void {
+    const tile_w: f32 = 16.0;
+    const tile_h: f32 = 16.0;
+
+    var ty: i32 = 0;
+    while (ty < world.tiles_y) : (ty += 1) {
+        var tx: i32 = 0;
+        while (tx < world.tiles_x) : (tx += 1) {
+            const x = @as(f32, @floatFromInt(tx)) * tile_w;
+            const y = @as(f32, @floatFromInt(ty)) * tile_h;
+
+            // Determine the correct tile direction based on position
+            const dir: LandscapeTile.Dir = blk: {
+                const is_left = tx == 0;
+                const is_right = tx == world.tiles_x - 1;
+                const is_top = ty == 0;
+                const is_bottom = ty == world.tiles_y - 1;
+
+                if (is_left and is_top) {
+                    break :blk .TopLeftCorner;
+                } else if (is_right and is_top) {
+                    break :blk .TopRightCorner;
+                } else if (is_left and is_bottom) {
+                    break :blk .BottomLeftCorner;
+                } else if (is_right and is_bottom) {
+                    break :blk .BottomRightCorner;
+                } else if (is_left) {
+                    break :blk .Left;
+                } else if (is_right) {
+                    break :blk .Right;
+                } else if (is_top) {
+                    break :blk .Top;
+                } else if (is_bottom) {
+                    break :blk .Bottom;
+                } else {
+                    break :blk .Center;
+                }
+            };
+
+            drawLandscapeTile(grass, dir, x, y);
+        }
+    }
+}
+
 fn drawWorldTiles(tileset: rl.Texture2D, world: shared.World) void {
     const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
     const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
@@ -225,13 +269,11 @@ pub fn main() !void {
             .Grass = LandscapeTile.init(tileset_texture),
         },
     };
-    const dirt = Frames{
+    _ = Frames{
         .SpringTiles = .{
             .Road = LandscapeTile.init(tileset_texture),
         },
     };
-    _ = grass;
-    _ = dirt;
 
     // Initialize World
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -289,12 +331,16 @@ pub fn main() !void {
         // Draw the raw tileset first as a background reference (to the right)
         rl.drawTexture(tileset_texture, @as(i32, @intFromFloat(world.width)), 0, .white);
 
-        // Draw the world tiles
+        // Draw grass background first
+
+        // Draw the world tiles on top
         if (use_autotile) {
             // NEW: Auto-tile system - automatically selects correct sprite based on neighbors
-            const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
-            const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
-            auto_tile_map.draw(tile_w, tile_h);
+            // const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
+            // const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
+            // auto_tile_map.draw(tile_w, tile_h);
+
+            drawGrassBackground(grass, world);
         } else {
             // OLD: Explicit TileKind system (manual sprite selection)
             drawWorldTiles(tileset_texture, world);

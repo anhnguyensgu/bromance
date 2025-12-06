@@ -12,12 +12,13 @@ pub fn build(b: *std.Build) void {
     const raygui = raylib_dep.module("raygui"); // raygui module
     const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
 
-    // Shared module (pure Zig, reused by client & server)
+    // Shared module (reused by client & server)
     const shared_mod = b.addModule("shared", .{
         .root_source_file = b.path("src/shared.zig"),
         .target = target,
         .optimize = optimize,
     });
+    shared_mod.addImport("raylib", raylib);
 
     const root_module = b.addModule("zig_client_root", .{
         .root_source_file = b.path("src/main.zig"),

@@ -320,7 +320,7 @@ pub const AutoTileRenderer = struct {
             var tx: i32 = 0;
             while (tx < layer.width) : (tx += 1) {
                 const config = self.configs.get(1) orelse continue;
-                var coords: [2]i32 = .{ 8, 0 };
+                var coords: [2]i32 = .{ 8, 8 };
                 if (tx == 0) {
                     if (ty == layer.height - 1) {
                         coords[1] += 3;

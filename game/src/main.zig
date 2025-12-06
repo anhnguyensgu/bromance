@@ -15,6 +15,9 @@ const MoveDirection = command.MoveDirection;
 const shared = @import("shared.zig");
 const tiles = @import("tiles/layer.zig");
 const MultiLayerTileMap = tiles.MultiLayerTileMap;
+const ui_menu = @import("ui/menu.zig");
+const MenuItem = ui_menu.MenuItem;
+const Menu = ui_menu.Menu;
 
 fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
     const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;
@@ -35,7 +38,8 @@ fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32,
         cam_target_y = world.height * 0.5;
     }
 
-    camera.target = .init(cam_target_x, cam_target_y - 28);
+    // Keep the camera centered on the player; avoid pushing the target upward, which left a blank strip at the top.
+    camera.target = .init(cam_target_x, cam_target_y);
 }
 
 fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, terrain_texture: rl.Texture2D, ruins_texture: rl.Texture2D, world: shared.World) void {
@@ -112,42 +116,82 @@ fn toggle_sidebar() void {
     sidebar_opened = !sidebar_opened;
 }
 
-fn drawMenu(screen_width: i32, menu_height: i32, comptime menu_items: []const MenuItem, active_item: *?usize) void {
-    const menu_height_f = @as(f32, @floatFromInt(menu_height));
-
-    rl.drawRectangle(0, 0, screen_width, menu_height, rl.Color{ .r = 30, .g = 34, .b = 48, .a = 255 });
-    rl.drawLine(0, menu_height, screen_width, menu_height, .gray);
-
-    var x: f32 = 8;
-    const padding: f32 = 12;
-    const spacing: f32 = 16;
-
-    const mouse = rl.getMousePosition();
-    const clicked = rl.isMouseButtonPressed(rl.MouseButton.left);
-
-    inline for (menu_items, 0..) |item, idx| {
-        const text_w = rl.measureText(item.label, 18);
-        const w = @as(f32, @floatFromInt(text_w)) + padding * 2;
-        const rect = rl.Rectangle{ .x = x, .y = 0, .width = w, .height = menu_height_f };
-
-        const hovered = rl.checkCollisionPointRec(mouse, rect);
-        const is_active = if (active_item.*) |current| current == idx else false;
-        const bg = if (hovered or is_active) rl.Color{ .r = 50, .g = 56, .b = 72, .a = 255 } else rl.Color{ .r = 30, .g = 34, .b = 48, .a = 255 };
-        rl.drawRectangleRec(rect, bg);
-        rl.drawText(item.label, @intFromFloat(x + padding), 6, 18, .ray_white);
-
-        if (hovered and clicked) {
-            active_item.* = idx;
-            item.action(); // call your handler
-        }
-
-        x += w + spacing;
-    }
-}
-
 fn inventoryAction() void {}
 fn buildAction() void {}
 fn settingsAction() void {}
+const main_menu_items = [_]MenuItem{
+    .{ .label = "Map", .action = toggle_map },
+    .{ .label = "Inventory", .action = inventoryAction },
+    .{ .label = "Build", .action = buildAction },
+    .{ .label = "Settings", .action = settingsAction },
+};
+
+const BubbleItem = struct {
+    label: [:0]const u8,
+    action: *const fn () void,
+};
+
+const bubble_items = [_]BubbleItem{
+    .{ .label = "Map", .action = &toggle_map },
+    .{ .label = "Inventory", .action = &inventoryAction },
+    .{ .label = "Build", .action = &buildAction },
+    .{ .label = "Settings", .action = &settingsAction },
+};
+
+fn drawBubbleMenu(center: rl.Vector2, items: []const BubbleItem, mouse_pos: rl.Vector2, clicked: bool) bool {
+    if (items.len == 0) return false;
+
+    const item_radius: f32 = 36.0;
+    const ring_radius: f32 = 110.0;
+    const tau: f32 = 2.0 * std.math.pi;
+
+    // Anchor circle at the center (player position on screen)
+    rl.drawCircleV(center, 18, rl.Color{ .r = 30, .g = 34, .b = 48, .a = 235 });
+    const center_ix: i32 = @intFromFloat(center.x);
+    const center_iy: i32 = @intFromFloat(center.y);
+    rl.drawCircleLines(center_ix, center_iy, 22, rl.Color{ .r = 64, .g = 72, .b = 102, .a = 255 });
+
+    var close_menu = false;
+
+    var idx: usize = 0;
+    while (idx < items.len) : (idx += 1) {
+        const item = items[idx];
+        const angle = (tau / @as(f32, @floatFromInt(items.len))) * @as(f32, @floatFromInt(idx)) - std.math.pi * 0.5;
+        const pos = rl.Vector2{
+            .x = center.x + std.math.cos(angle) * ring_radius,
+            .y = center.y + std.math.sin(angle) * ring_radius,
+        };
+
+        const hovered = rl.checkCollisionPointCircle(mouse_pos, pos, item_radius);
+        const fill = if (hovered) rl.Color{ .r = 64, .g = 74, .b = 108, .a = 245 } else rl.Color{ .r = 42, .g = 48, .b = 68, .a = 220 };
+        const stroke = rl.Color{ .r = 88, .g = 98, .b = 132, .a = 255 };
+        rl.drawCircleV(pos, item_radius, fill);
+        const pos_ix: i32 = @intFromFloat(pos.x);
+        const pos_iy: i32 = @intFromFloat(pos.y);
+        rl.drawCircleLines(pos_ix, pos_iy, item_radius, stroke);
+
+        const text_w = rl.measureText(item.label, 16);
+        rl.drawText(item.label, pos_ix - @divTrunc(text_w, 2), pos_iy - 8, 16, .ray_white);
+
+        if (hovered and clicked) {
+            item.action();
+            close_menu = true;
+        }
+    }
+
+    // Close the menu if user clicks outside the bubbles.
+    if (clicked and !close_menu) {
+        const outer_radius = ring_radius + item_radius;
+        const dx = mouse_pos.x - center.x;
+        const dy = mouse_pos.y - center.y;
+        const dist_sq = dx * dx + dy * dy;
+        if (dist_sq > outer_radius * outer_radius) {
+            return true;
+        }
+    }
+
+    return close_menu;
+}
 
 // Left Sidebar Menu Item
 const SidebarItem = struct {
@@ -189,10 +233,6 @@ fn drawSidebar(sidebar_texture: rl.Texture2D, screen_height: i32, menu_height: i
     rl.drawTexturePro(sidebar_texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color.white);
 }
 
-const MenuItem = struct {
-    label: [:0]const u8,
-    action: fn () void,
-};
 pub fn runRaylib() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -205,13 +245,16 @@ pub fn runRaylib() anyerror!void {
     //--------------------------------------------------------------------------------------
     const screen_width = 800;
     const screen_height = 450;
-    const menu_height: i32 = 0;
 
     rl.initWindow(screen_width, screen_height, "Bromance");
     defer rl.closeWindow(); // Close window and OpenGL context
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
+
+    var top_menu = try Menu.load();
+    defer top_menu.deinit();
+    const menu_height: i32 = top_menu.height;
 
     // Main game loop
     // Load Character Assets
@@ -279,7 +322,7 @@ pub fn runRaylib() anyerror!void {
     const UI_MARGIN_PX: i32 = 32; // keep minimap a bit away from edges
     const MINIMAP_POS = rl.Vector2{
         .x = @as(f32, @floatFromInt(UI_MARGIN_PX)),
-        .y = @as(f32, @floatFromInt(UI_MARGIN_PX)),
+        .y = @as(f32, @floatFromInt(menu_height + UI_MARGIN_PX)),
     };
     const minimap = try rl.loadRenderTexture(MINIMAP_SIZE, MINIMAP_SIZE);
     defer rl.unloadRenderTexture(minimap);
@@ -304,6 +347,7 @@ pub fn runRaylib() anyerror!void {
     defer net_thread.join();
 
     // Main game loop
+    var active_menu_item: ?usize = null;
     while (!rl.windowShouldClose()) {
         const delta = rl.getFrameTime();
         var move_cmd: ?MovementCommand = null;
@@ -434,6 +478,8 @@ pub fn runRaylib() anyerror!void {
         try player.draw(assets);
         rl.endMode2D();
 
+        top_menu.draw(screen_width, main_menu_items[0..], &active_menu_item);
+
         // Draw left sidebar overlay
         // if (sidebar_opened) {
         //     drawSidebar(sidebar_texture, screen_height, menu_height);
@@ -446,13 +492,8 @@ pub fn runRaylib() anyerror!void {
 
         var buf: [128]u8 = undefined;
         const pos_text = std.fmt.bufPrintZ(&buf, "Player: ({:.0}, {:.0})", .{ player.pos.x, player.pos.y }) catch "";
-        rl.drawText(
-            pos_text,
-            MINIMAP_POS.x + 10,
-            @intFromFloat(@as(f32, @floatFromInt(menu_height)) + 10),
-            20,
-            .dark_gray,
-        );
+        const minimap_pos_x: i32 = @intFromFloat(MINIMAP_POS.x);
+        rl.drawText(pos_text, minimap_pos_x + 10, menu_height + 10, 20, .dark_gray);
 
         rl.drawFPS(10, menu_height + 10);
     }

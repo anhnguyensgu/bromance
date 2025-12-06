@@ -1,14 +1,14 @@
 const std = @import("std");
-pub const tiles = @import("tiles/layer.zig");
-const t = @import("tiles/terrain.zig");
-pub const landscape = @import("tiles/landscape.zig");
-const TerrainType = t.TerrainType;
 
 pub const command = @import("movement/command.zig");
 pub const MovementCommand = command.MovementCommand;
 pub const MoveDirection = command.MoveDirection;
 pub const network = @import("network.zig");
 pub const PingPayload = network.PingPayload;
+pub const landscape = @import("tiles/landscape.zig");
+pub const tiles = @import("tiles/layer.zig");
+const t = @import("tiles/terrain.zig");
+const TerrainType = t.TerrainType;
 
 pub const PlayerState = struct {
     x: f32,
