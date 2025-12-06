@@ -3,14 +3,13 @@ zig-cache/
 .zig-cache/
 zig-cache-*/
 zig-cache-global/
-.zig-cache-global/
 zig-out/
 
 # Ignore caches anywhere in the tree as well
 **/zig-cache/
 **/zig-cache-*/
 **/zig-cache-global/
-**/.zig-cache-global/
+**/.zig-global-cache/
 **/zig-out/
 
 # Compiled objects and libraries
