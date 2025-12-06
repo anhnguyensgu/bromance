@@ -12,12 +12,13 @@ pub fn build(b: *std.Build) void {
     const raygui = raylib_dep.module("raygui"); // raygui module
     const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
 
-    // Shared module (pure Zig, reused by client & server)
+    // Shared module (reused by client & server)
     const shared_mod = b.addModule("shared", .{
         .root_source_file = b.path("src/shared.zig"),
         .target = target,
         .optimize = optimize,
     });
+    shared_mod.addImport("raylib", raylib);
 
     const root_module = b.addModule("zig_client_root", .{
         .root_source_file = b.path("src/main.zig"),
@@ -60,19 +61,19 @@ pub fn build(b: *std.Build) void {
     run_server.step.dependOn(b.getInstallStep());
     b.step("run-server", "Run the zig server").dependOn(&run_server.step);
 
-    // Tiles Test executable
-    const tiles_mod = b.addModule("zig_tiles_root", .{
-        .root_source_file = b.path("src/tiles_test.zig"),
+    // Tile Inspector executable
+    const inspector_mod = b.addModule("zig_inspector_root", .{
+        .root_source_file = b.path("src/tile_inspector.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "shared", .module = shared_mod }},
     });
-    const tiles_exe = b.addExecutable(.{ .name = "tiles-test", .root_module = tiles_mod });
-    tiles_exe.linkLibrary(raylib_artifact);
-    tiles_exe.root_module.addImport("raylib", raylib);
-    tiles_exe.root_module.addImport("raygui", raygui);
-    b.installArtifact(tiles_exe);
-    const run_tiles = b.addRunArtifact(tiles_exe);
-    run_tiles.step.dependOn(b.getInstallStep());
-    b.step("run-tiles", "Run the tiles test app").dependOn(&run_tiles.step);
+    const inspector_exe = b.addExecutable(.{ .name = "tile-inspector", .root_module = inspector_mod });
+    inspector_exe.linkLibrary(raylib_artifact);
+    inspector_exe.root_module.addImport("raylib", raylib);
+    inspector_exe.root_module.addImport("raygui", raygui);
+    b.installArtifact(inspector_exe);
+    const run_inspector = b.addRunArtifact(inspector_exe);
+    run_inspector.step.dependOn(b.getInstallStep());
+    b.step("run-inspector", "Run the tile inspector app").dependOn(&run_inspector.step);
 }

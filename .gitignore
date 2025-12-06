@@ -9,6 +9,7 @@ zig-out/
 **/zig-cache/
 **/zig-cache-*/
 **/zig-cache-global/
+**/.zig-global-cache/
 **/zig-out/
 
 # Compiled objects and libraries
