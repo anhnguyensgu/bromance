@@ -273,7 +273,7 @@ pub fn main() !void {
     defer rl.unloadTexture(tileset_texture);
     const grass = Frames{
         .SpringTiles = .{
-            .Grass = LandscapeTile.init(tileset_texture),
+            .Grass = LandscapeTile.init(tileset_texture, 8.0, 0.0),
         },
     };
 
@@ -306,7 +306,9 @@ pub fn main() !void {
     };
 
     //UI has spritesheet
-    var menu = try Menu.load();
+    const menu_texture = try rl.loadTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
+    defer rl.unloadTexture(menu_texture);
+    var menu = Menu.init(menu_texture, .{});
     defer menu.deinit();
 
     const PlacementState = struct {
@@ -337,7 +339,7 @@ pub fn main() !void {
     }.add;
 
     // Grass variants
-    const grass_frames = sheets.SpriteSet.SpringTileGrass(tileset_texture);
+    const grass_frames = sheets.SpriteSet.SpringTileGrass(tileset_texture, 8.0, 0.0);
     inline for (std.meta.fields(LandscapeTile.Dir)) |field| {
         const dir = @field(LandscapeTile.Dir, field.name);
         // Shorten label for menu width? Or just use "Grass"
@@ -348,8 +350,15 @@ pub fn main() !void {
     }
 
     // Road (Center only for now)
-    const road_frames = sheets.SpriteSet.SpringTileRoad(tileset_texture);
-    try addMenuItem(&menu_items_list, allocator, "Road", road_frames.SpringTiles.Road.get(.Center), tileset_texture);
+    const road_frames = sheets.SpriteSet.SpringTileRoad(tileset_texture, 8.0, 4.0);
+    inline for (std.meta.fields(LandscapeTile.Dir)) |field| {
+        const dir = @field(LandscapeTile.Dir, field.name);
+        // Shorten label for menu width? Or just use "Grass"
+        // User said "grass with all diretion", maybe helpful to label them?
+        // But drawMenuItem draws label on top if no sprite? No, it draws sprite if data exists.
+        // Label is fallback. But let's set label to "Grass".
+        try addMenuItem(&menu_items_list, allocator, "Road", road_frames.SpringTiles.Road.get(dir), tileset_texture);
+    }
 
     // Clean up created data pointers at end of scope
     defer {

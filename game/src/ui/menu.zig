@@ -4,6 +4,14 @@ const sheets = shared.sheets;
 const MenuSprite = sheets.MenuSprites;
 const MenuSpriteId = sheets.MenuSpriteId;
 
+pub const MenuLayout = struct {
+    spacing: f32 = 12.0,
+    tile_size: f32 = 40.0,
+    side_padding: f32 = 25.0,
+    top_padding: f32 = 30.0,
+    max_menu_width: f32 = 400.0,
+};
+
 pub const MenuItem = struct {
     label: [:0]const u8,
     action: *const fn () void,
@@ -30,14 +38,13 @@ pub const MenuItem = struct {
 pub const Menu = struct {
     const Self = @This();
     sprite_set: shared.sheets.SpriteSet,
-    height: i32,
+    layout: MenuLayout,
     is_open: bool = false,
 
-    pub fn load() !Menu {
-        const tex = try rl.loadTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
+    pub fn init(texture: rl.Texture2D, layout: MenuLayout) Menu {
         return .{
-            .sprite_set = shared.sheets.SpriteSet.MenuSheet(tex),
-            .height = 48,
+            .sprite_set = shared.sheets.SpriteSet.MenuSheet(texture),
+            .layout = layout,
         };
     }
 
@@ -46,27 +53,31 @@ pub const Menu = struct {
     }
 
     pub fn deinit(self: *Menu) void {
-        switch (self.sprite_set) {
-            .Menu => |sheet| sheet.deinit(),
-            else => {},
-        }
+        _ = self;
+        // Texture is owned by client, nothing to clean up here for now.
     }
 
     pub fn draw(self: *Self, pos_x: f32, menu_items: []const MenuItem, active_item: ?*?usize) void {
-        const menu_width: f32 = 300;
+        const spacing = self.layout.spacing;
+        const tile_size = self.layout.tile_size;
+        const side_padding = self.layout.side_padding;
+        const top_padding = self.layout.top_padding;
+        const max_menu_width = self.layout.max_menu_width;
 
-        const spacing: f32 = 12.0;
-        const tile_size: f32 = 40.0; // Use a fixed tile size for grid cells
-        const side_padding: f32 = 25.0;
-        const top_padding: f32 = 30.0;
+        // Calculate columns dynamically based on item count
+        const available_max_width = max_menu_width - (2.0 * side_padding);
+        const max_cols: usize = @intFromFloat(@divFloor(available_max_width + spacing, tile_size + spacing));
 
-        // Calculate columns dynamically
-        const available_width = menu_width - (2.0 * side_padding);
-        const cols: usize = @intFromFloat(@divFloor(available_width + spacing, tile_size + spacing));
+        var cols = menu_items.len;
+        if (cols > max_cols) cols = max_cols;
+        if (cols < 1) cols = 1;
+
+        const menu_width: f32 = (2.0 * side_padding) + (@as(f32, @floatFromInt(cols)) * (tile_size + spacing)) - spacing;
+        const ratio = menu_width / 80.0;
 
         const rows = (menu_items.len + cols - 1) / cols;
         const total_height = top_padding + (@as(f32, @floatFromInt(rows)) * (tile_size + spacing)) + spacing;
-        const total_height_f = total_height;
+        const total_height_f = @max(total_height, 100 * ratio);
 
         if (rl.isKeyPressed(.b)) {
             self.toggle();
@@ -91,7 +102,9 @@ pub const Menu = struct {
             const x = pos_x + side_padding + (@as(f32, @floatFromInt(col)) * (tile_size + spacing));
             const y = top_padding + (@as(f32, @floatFromInt(row)) * (tile_size + spacing));
 
-            const rect = rl.Rectangle{ .x = x, .y = y, .width = tile_size, .height = tile_size };
+            const padding = 5;
+            const rect = rl.Rectangle{ .x = x - padding, .y = y - padding, .width = tile_size + padding * 2, .height = tile_size + padding * 2 };
+            rl.drawRectangleLines(@intFromFloat(rect.x), @intFromFloat(rect.y), @intFromFloat(rect.width), @intFromFloat(rect.height), .white);
 
             // Draw semi-transparent overlay for hover/active states
             const hovered = rl.checkCollisionPointRec(mouse, rect);
@@ -113,6 +126,6 @@ pub const Menu = struct {
             }
         }
 
-        rl.drawLine(@intFromFloat(pos_x), @intFromFloat(total_height_f), @intFromFloat(pos_x + menu_width), @intFromFloat(total_height_f), .gray);
+        rl.drawLine(@intFromFloat(pos_x), @intFromFloat(total_height_f), @intFromFloat(pos_x + menu_width), @intFromFloat(total_height_f), .red);
     }
 };

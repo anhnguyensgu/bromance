@@ -18,10 +18,13 @@ pub const LandscapeTile = struct {
         BottomLeftCorner = 6,
         Bottom = 7,
         BottomRightCorner = 8,
+
+        InnerCenter1 = 9,
+        InnerCenter2 = 10,
     };
 
     /// 9 entries: 3x3 block
-    descriptors: [9]SpriteRect,
+    descriptors: [11]SpriteRect,
     texture2D: rl.Texture2D,
 
     const Self = @This();
@@ -31,10 +34,8 @@ pub const LandscapeTile = struct {
     /// This version is specialized to the road block used previously:
     /// it assumes a 3x3 block starting at tile coords (8, 0),
     /// with each tile 16x16 pixels.
-    pub fn init(text: rl.Texture2D) Self {
+    pub fn init(text: rl.Texture2D, base_tx: f32, base_ty: f32) Self {
         const ts: f32 = 16.0;
-        const base_tx: f32 = 8.0;
-        const base_ty: f32 = 0.0;
 
         return Self{
             .descriptors = [_]SpriteRect{
@@ -52,6 +53,9 @@ pub const LandscapeTile = struct {
                 .{ .x = (base_tx + 0.0) * ts, .y = (base_ty + 3.0) * ts, .width = ts, .height = ts },
                 .{ .x = (base_tx + 1.0) * ts, .y = (base_ty + 3.0) * ts, .width = ts, .height = ts },
                 .{ .x = (base_tx + 3.0) * ts, .y = (base_ty + 3.0) * ts, .width = ts, .height = ts },
+
+                .{ .x = (base_tx + 1.0) * ts, .y = (base_ty + 1.0) * ts, .width = ts, .height = ts },
+                .{ .x = (base_tx + 2.0) * ts, .y = (base_ty + 2.0) * ts, .width = ts, .height = ts },
             },
             .texture2D = text,
         };

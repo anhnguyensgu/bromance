@@ -38,7 +38,7 @@ pub const MenuSprites = struct {
     pub fn init(text: rl.Texture2D) Self {
         return .{
             .descriptors = .{
-                .{ .x = 95, .y = 3, .width = 82.6, .height = 176 }, // header strip
+                .{ .x = 95, .y = 3, .width = 83, .height = 172 }, // header strip
                 .{ .x = 64.0, .y = 0.0, .width = 64.0, .height = 64.0 }, // button tile
             },
             .texture2D = text,
@@ -69,17 +69,21 @@ pub const SpriteSet = union(SpriteSheets) {
     Menu: MenuSprites,
 
     /// Convenience constructor for a spring grass 3x3 tile block.
-    pub fn SpringTileGrass(tileset_texture: rl.Texture2D) SpriteSet {
-        return .{ .SpringTiles = .{
-            .Grass = LandscapeTile.init(tileset_texture),
-        } };
+    pub fn SpringTileGrass(tileset_texture: rl.Texture2D, base_tx: f32, base_ty: f32) SpriteSet {
+        return .{
+            .SpringTiles = .{
+                .Grass = LandscapeTile.init(tileset_texture, base_tx, base_ty), // Grass is at 0,0
+            },
+        };
     }
 
     /// Convenience constructor for a spring road 3x3 tile block.
-    pub fn SpringTileRoad(tileset_texture: rl.Texture2D) SpriteSet {
-        return .{ .SpringTiles = .{
-            .Road = LandscapeTile.init(tileset_texture),
-        } };
+    pub fn SpringTileRoad(tileset_texture: rl.Texture2D, base_tx: f32, base_ty: f32) SpriteSet {
+        return .{
+            .SpringTiles = .{
+                .Road = LandscapeTile.init(tileset_texture, base_tx, base_ty), // Road is at 8,0
+            },
+        };
     }
 
     /// Convenience constructor for menu sprites.

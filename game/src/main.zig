@@ -252,9 +252,11 @@ pub fn runRaylib() anyerror!void {
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
-    var top_menu = try Menu.load();
+    const menu_texture = try rl.loadTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
+    defer rl.unloadTexture(menu_texture);
+    var top_menu = Menu.init(menu_texture, .{});
     defer top_menu.deinit();
-    const menu_height: i32 = top_menu.height;
+    const menu_height: i32 = 48;
 
     // Main game loop
     // Load Character Assets
