@@ -17,6 +17,8 @@ pub const SpriteRect = struct {
 pub const SpriteSheets = enum {
     SpringTiles,
     Menu,
+    House,
+    Lake,
 };
 
 pub const LandscapeTile = landscape.LandscapeTile;
@@ -54,6 +56,52 @@ pub const MenuSprites = struct {
     }
 };
 
+pub const House = struct {
+    descriptor: SpriteRect,
+    texture2D: rl.Texture2D,
+
+    const Self = @This();
+
+    pub fn init(text: rl.Texture2D) Self {
+        return .{
+            .descriptor = .{
+                .x = 150,
+                .y = 0,
+                .width = @as(f32, @floatFromInt(@divTrunc(text.width, 3))),
+                .height = @as(f32, @floatFromInt(text.height)),
+            },
+            .texture2D = text,
+        };
+    }
+
+    pub fn deinit(self: Self) void {
+        rl.unloadTexture(self.texture2D);
+    }
+};
+
+pub const Lake = struct {
+    descriptor: SpriteRect,
+    texture2D: rl.Texture2D,
+
+    const Self = @This();
+
+    pub fn init(text: rl.Texture2D) Self {
+        return .{
+            .descriptor = .{
+                .x = 0,
+                .y = 0,
+                .width = @floatFromInt(text.width),
+                .height = @floatFromInt(text.height),
+            },
+            .texture2D = text,
+        };
+    }
+
+    pub fn deinit(self: Self) void {
+        rl.unloadTexture(self.texture2D);
+    }
+};
+
 /// A tagged union of available sprite-sheet groups and terrain types.
 ///
 /// Example:
@@ -67,6 +115,8 @@ pub const SpriteSet = union(SpriteSheets) {
         Road: LandscapeTile,
     },
     Menu: MenuSprites,
+    House: House,
+    Lake: Lake,
 
     /// Convenience constructor for a spring grass 3x3 tile block.
     pub fn SpringTileGrass(tileset_texture: rl.Texture2D, base_tx: f32, base_ty: f32) SpriteSet {
@@ -89,6 +139,14 @@ pub const SpriteSet = union(SpriteSheets) {
     /// Convenience constructor for menu sprites.
     pub fn MenuSheet(menu_texture: rl.Texture2D) SpriteSet {
         return .{ .Menu = MenuSprites.init(menu_texture) };
+    }
+
+    pub fn HouseSheet(texture: rl.Texture2D) SpriteSet {
+        return .{ .House = House.init(texture) };
+    }
+
+    pub fn LakeSheet(texture: rl.Texture2D) SpriteSet {
+        return .{ .Lake = Lake.init(texture) };
     }
 };
 

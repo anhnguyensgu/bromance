@@ -15,6 +15,7 @@ pub const MenuLayout = struct {
 pub const MenuItem = struct {
     label: [:0]const u8,
     action: *const fn () void,
+    col_span: usize = 1,
     custom_draw: ?*const fn (item: *const MenuItem, rect: rl.Rectangle, active: bool, hovered: bool) void = null,
     data: ?*const anyopaque = null,
 
@@ -75,8 +76,33 @@ pub const Menu = struct {
         const menu_width: f32 = (2.0 * side_padding) + (@as(f32, @floatFromInt(cols)) * (tile_size + spacing)) - spacing;
         const ratio = menu_width / 80.0;
 
-        const rows = (menu_items.len + cols - 1) / cols;
-        const total_height = top_padding + (@as(f32, @floatFromInt(rows)) * (tile_size + spacing)) + spacing;
+        // First pass: Calculate total height needed
+        var current_col: usize = 0;
+        var current_row: usize = 0;
+        for (menu_items) |item| {
+            var span = item.col_span;
+            if (span > max_cols) span = max_cols;
+
+            // If item doesn't fit in current row, wrap to next line
+            if (current_col + span > max_cols) {
+                current_col = 0;
+                current_row += 1;
+            }
+
+            // Advance cursor
+            current_col += span;
+            if (current_col >= max_cols) {
+                current_col = 0;
+                current_row += 1;
+            }
+        }
+        // If we ended exactly at start of new row, rows count is explicitly correct (due to final += 1),
+        // but if we ended mid-row, we are still IN that row, so count is row + 1.
+        // BUT my logic above increments current_row PREEMPTIVELY if we wrap.
+        // Let's refine the loop below to be identical for drawing.
+
+        const total_rows = if (current_col == 0 and current_row > 0) current_row else current_row + 1;
+        const total_height = top_padding + (@as(f32, @floatFromInt(total_rows)) * (tile_size + spacing)) + spacing;
         const total_height_f = @max(total_height, 100 * ratio);
 
         if (rl.isKeyPressed(.b)) {
@@ -86,7 +112,7 @@ pub const Menu = struct {
         switch (self.sprite_set) {
             .Menu => |sheet| {
                 const rect = sheet.get(.Background);
-                // Adjust background height to fit grid
+                // Adjust background height to fit content
                 sheets.drawSpriteTo(sheet.texture2D, rect, .{ .x = pos_x, .y = 0, .width = menu_width, .height = total_height_f });
             },
             else => {},
@@ -95,16 +121,36 @@ pub const Menu = struct {
         const mouse = rl.getMousePosition();
         const clicked = rl.isMouseButtonPressed(rl.MouseButton.left);
 
+        current_col = 0;
+        current_row = 0;
+
         for (menu_items, 0..) |item, idx| {
-            const col = idx % cols;
-            const row = idx / cols;
+            var span = item.col_span;
+            if (span > max_cols) span = max_cols;
 
-            const x = pos_x + side_padding + (@as(f32, @floatFromInt(col)) * (tile_size + spacing));
-            const y = top_padding + (@as(f32, @floatFromInt(row)) * (tile_size + spacing));
+            // Wrap if needed
+            if (current_col + span > max_cols) {
+                current_col = 0;
+                current_row += 1;
+            }
 
-            const padding = 5;
-            const rect = rl.Rectangle{ .x = x - padding, .y = y - padding, .width = tile_size + padding * 2, .height = tile_size + padding * 2 };
-            rl.drawRectangleLines(@intFromFloat(rect.x), @intFromFloat(rect.y), @intFromFloat(rect.width), @intFromFloat(rect.height), .white);
+            const x = pos_x + side_padding + (@as(f32, @floatFromInt(current_col)) * (tile_size + spacing));
+            const y = top_padding + (@as(f32, @floatFromInt(current_row)) * (tile_size + spacing));
+
+            // Calculate width based on span
+            // width = (tile_size * span) + (spacing * (span - 1))
+            const item_width = (tile_size * @as(f32, @floatFromInt(span))) + (spacing * @as(f32, @floatFromInt(span - 1)));
+
+            const padding = 3;
+            const rect = rl.Rectangle{ .x = x - padding, .y = y - padding, .width = item_width + padding * 2, .height = tile_size + padding * 2 };
+            rl.drawRectangleLinesEx(rect, 2.0, .white);
+
+            // Advance cursor for next item
+            current_col += span;
+            if (current_col >= max_cols) {
+                current_col = 0;
+                current_row += 1;
+            }
 
             // Draw semi-transparent overlay for hover/active states
             const hovered = rl.checkCollisionPointRec(mouse, rect);

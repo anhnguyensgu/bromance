@@ -271,6 +271,21 @@ pub fn main() !void {
 
     const tileset_texture = try rl.loadTextureFromImage(tileset_img);
     defer rl.unloadTexture(tileset_texture);
+
+    const house_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
+    defer rl.unloadImage(house_img);
+    const house_texture = try rl.loadTextureFromImage(house_img);
+    defer rl.unloadTexture(house_texture);
+
+    const house_sprites = shared.sheets.SpriteSet.HouseSheet(house_texture);
+    defer house_sprites.House.deinit();
+
+    const lake_img = try rl.loadImage("assets/lake_small.png");
+    defer rl.unloadImage(lake_img);
+    const lake_texture = try rl.loadTextureFromImage(lake_img);
+    const lake_sprites = shared.sheets.SpriteSet.LakeSheet(lake_texture);
+    defer lake_sprites.Lake.deinit();
+
     const grass = Frames{
         .SpringTiles = .{
             .Grass = LandscapeTile.init(tileset_texture, 8.0, 0.0),
@@ -305,12 +320,6 @@ pub fn main() !void {
         .zoom = 1.0,
     };
 
-    //UI has spritesheet
-    const menu_texture = try rl.loadTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
-    defer rl.unloadTexture(menu_texture);
-    var menu = Menu.init(menu_texture, .{});
-    defer menu.deinit();
-
     const PlacementState = struct {
         active_item: ?*const TileData = null,
         is_placing: bool = false,
@@ -338,26 +347,41 @@ pub fn main() !void {
         }
     }.add;
 
-    // Grass variants
-    const grass_frames = sheets.SpriteSet.SpringTileGrass(tileset_texture, 8.0, 0.0);
-    inline for (std.meta.fields(LandscapeTile.Dir)) |field| {
-        const dir = @field(LandscapeTile.Dir, field.name);
-        // Shorten label for menu width? Or just use "Grass"
-        // User said "grass with all diretion", maybe helpful to label them?
-        // But drawMenuItem draws label on top if no sprite? No, it draws sprite if data exists.
-        // Label is fallback. But let's set label to "Grass".
-        try addMenuItem(&menu_items_list, allocator, "Grass", grass_frames.SpringTiles.Grass.get(dir), tileset_texture);
-    }
+    //UI has spritesheet
+    const menu_texture = try rl.loadTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
+    defer rl.unloadTexture(menu_texture);
+    var menu = Menu.init(menu_texture, .{});
+    defer menu.deinit();
 
-    // Road (Center only for now)
-    const road_frames = sheets.SpriteSet.SpringTileRoad(tileset_texture, 8.0, 4.0);
-    inline for (std.meta.fields(LandscapeTile.Dir)) |field| {
-        const dir = @field(LandscapeTile.Dir, field.name);
-        // Shorten label for menu width? Or just use "Grass"
-        // User said "grass with all diretion", maybe helpful to label them?
-        // But drawMenuItem draws label on top if no sprite? No, it draws sprite if data exists.
-        // Label is fallback. But let's set label to "Grass".
-        try addMenuItem(&menu_items_list, allocator, "Road", road_frames.SpringTiles.Road.get(dir), tileset_texture);
+    const frames = [_]sheets.SpriteSet{ grass, .{
+        .SpringTiles = .{
+            .Water = LandscapeTile.init(tileset_texture, 8.0, 8.0),
+        },
+    }, .{
+        .SpringTiles = .{
+            .Road = LandscapeTile.init(tileset_texture, 8.0, 4.0),
+        },
+    }, house_sprites, lake_sprites, menu.sprite_set };
+
+    for (frames) |g| {
+        switch (g) {
+            .SpringTiles => |t| switch (t) {
+                .Grass, .Road => |ts| {
+                    for (ts.descriptors) |desc| {
+                        try addMenuItem(&menu_items_list, allocator, "Grass", desc, ts.texture2D);
+                    }
+                },
+                else => {},
+            },
+            .House => |t| {
+                // House
+                try addMenuItem(&menu_items_list, allocator, "House", t.descriptor, t.texture2D);
+            },
+            .Lake => |t| {
+                try addMenuItem(&menu_items_list, allocator, "Lake", t.descriptor, t.texture2D);
+            },
+            else => {},
+        }
     }
 
     // Clean up created data pointers at end of scope

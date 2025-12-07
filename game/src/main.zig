@@ -298,7 +298,8 @@ pub fn runRaylib() anyerror!void {
     const townhall_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
     defer rl.unloadImage(townhall_img);
     const townhall_texture = try rl.loadTextureFromImage(townhall_img);
-    defer rl.unloadTexture(townhall_texture);
+    const townhall_sprites = shared.sheets.SpriteSet.HouseSheet(townhall_texture);
+    defer townhall_sprites.House.deinit();
 
     const lake_img = try rl.loadImage("assets/lake_small.png");
     defer rl.unloadImage(lake_img);
