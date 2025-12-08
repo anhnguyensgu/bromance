@@ -261,6 +261,9 @@ pub fn main() !void {
     rl.initWindow(screen_width, screen_height, "Tiles Test App");
     defer rl.closeWindow();
 
+    // Disable escape key from closing the window
+    rl.setExitKey(.null);
+
     rl.setTargetFPS(60);
 
     // Load Assets
@@ -323,6 +326,8 @@ pub fn main() !void {
     const PlacementState = struct {
         active_item: ?*const TileData = null,
         is_placing: bool = false,
+        last_placed_col: ?i32 = null,
+        last_placed_row: ?i32 = null,
     };
     var placement_state = PlacementState{};
     var active_menu_idx: ?usize = null;
@@ -413,11 +418,17 @@ pub fn main() !void {
             use_autotile = !use_autotile;
         }
 
-        // Placement Logic Inputs
+        // Placement Logic Inputs - ESC to deselect/cancel placement
         if (rl.isKeyPressed(.escape)) {
             placement_state.is_placing = false;
             placement_state.active_item = null;
             active_menu_idx = null;
+        }
+
+        // Reset last placed position when mouse button is released
+        if (rl.isMouseButtonReleased(.left)) {
+            placement_state.last_placed_col = null;
+            placement_state.last_placed_row = null;
         }
 
         rl.beginDrawing();
@@ -457,10 +468,13 @@ pub fn main() !void {
                 const snap_x = @as(f32, @floatFromInt(col)) * 16.0;
                 const snap_y = @as(f32, @floatFromInt(row)) * 16.0;
 
-                const rect = rl.Rectangle{ .x = snap_x, .y = snap_y, .width = 16, .height = 16 };
+                const tile_w = @divTrunc(@as(i32, @intFromFloat(data.sprite.width)) + 15, 16);
+                const tile_h = @divTrunc(@as(i32, @intFromFloat(data.sprite.height)) + 15, 16);
+
+                const rect = rl.Rectangle{ .x = snap_x, .y = snap_y, .width = @floatFromInt(tile_w * 16), .height = @floatFromInt(tile_h * 16) };
 
                 // Validity check (bounds)
-                const valid = (snap_x >= 0 and snap_y >= 0 and snap_x < world.width and snap_y < world.height);
+                const valid = (col >= 0 and row >= 0 and col + tile_w <= world.tiles_x and row + tile_h <= world.tiles_y);
 
                 // Colored Shadow
                 const shadow_color = if (valid) rl.Color{ .r = 0, .g = 255, .b = 0, .a = 100 } else rl.Color{ .r = 255, .g = 0, .b = 0, .a = 100 };
@@ -485,10 +499,14 @@ pub fn main() !void {
                     rl.Color{ .r = 255, .g = 255, .b = 255, .a = 150 }, // Ghost alpha
                 );
 
-                // Handle Click to Place
-                if (rl.isMouseButtonPressed(.left) and valid) {
+                // Handle Click to Place (keep placing while holding left mouse button)
+                // Only place if we moved to a new grid cell to avoid duplicates
+                const is_new_cell = (placement_state.last_placed_col != col or placement_state.last_placed_row != row);
+                if (rl.isMouseButtonDown(.left) and valid and is_new_cell) {
                     // Check if spot is free? For now just place on top
                     placed_items.append(allocator, .{ .data = data.*, .rect = rect }) catch {};
+                    placement_state.last_placed_col = col;
+                    placement_state.last_placed_row = row;
                 }
             }
         }
@@ -524,13 +542,10 @@ pub fn main() !void {
                 }
             }
         } else {
-            // If menu has no selection (e.g. user toggled off?), maybe exit placement?
-            // Logic depends on `active_item` behavior in menu.zig.
-            // Currently it toggles. If it becomes null, we stop placing.
-            if (!placement_state.is_placing) {
-                // consistent state
-            }
-            // If I press ESC, I set is_placing false, should I clear active_menu_idx code-side? done above.
+            // If menu has no selection (e.g. user toggled off), clear placement state
+            // Same behavior as pressing ESC
+            placement_state.is_placing = false;
+            placement_state.active_item = null;
         }
     }
 }

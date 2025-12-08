@@ -166,9 +166,19 @@ pub const Menu = struct {
 
             if (hovered and clicked) {
                 if (active_item) |ptr| {
-                    ptr.* = idx;
+                    // Toggle behavior: clicking same item deselects it
+                    if (ptr.*) |current| {
+                        if (current == idx) {
+                            ptr.* = null;
+                        } else {
+                            ptr.* = idx;
+                            item.action();
+                        }
+                    } else {
+                        ptr.* = idx;
+                        item.action();
+                    }
                 }
-                item.action();
             }
         }
 

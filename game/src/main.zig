@@ -249,6 +249,9 @@ pub fn runRaylib() anyerror!void {
     rl.initWindow(screen_width, screen_height, "Bromance");
     defer rl.closeWindow(); // Close window and OpenGL context
 
+    // Disable escape key from closing the window
+    rl.setExitKey(.null);
+
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
