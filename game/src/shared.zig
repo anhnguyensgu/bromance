@@ -6,9 +6,16 @@ pub const MoveDirection = command.MoveDirection;
 pub const network = @import("network.zig");
 pub const PingPayload = network.PingPayload;
 pub const landscape = @import("tiles/landscape.zig");
+pub const LandscapeTile = landscape.LandscapeTile;
+pub const drawLandscapeTile = landscape.drawLandscapeTile;
 pub const tiles = @import("tiles/layer.zig");
+pub const sheets = @import("tiles/sheets.zig");
+pub const Frames = sheets.SpriteSet;
 const t = @import("tiles/terrain.zig");
-const TerrainType = t.TerrainType;
+pub const TerrainType = t.TerrainType;
+
+pub const menu = @import("ui/menu.zig");
+pub const editor_map = @import("map/editor_map.zig");
 
 pub const PlayerState = struct {
     x: f32,

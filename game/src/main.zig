@@ -249,12 +249,17 @@ pub fn runRaylib() anyerror!void {
     rl.initWindow(screen_width, screen_height, "Bromance");
     defer rl.closeWindow(); // Close window and OpenGL context
 
+    // Disable escape key from closing the window
+    rl.setExitKey(.null);
+
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
-    var top_menu = try Menu.load();
+    const menu_texture = try rl.loadTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
+    defer rl.unloadTexture(menu_texture);
+    var top_menu = Menu.init(menu_texture, .{});
     defer top_menu.deinit();
-    const menu_height: i32 = top_menu.height;
+    const menu_height: i32 = 48;
 
     // Main game loop
     // Load Character Assets
@@ -296,7 +301,8 @@ pub fn runRaylib() anyerror!void {
     const townhall_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
     defer rl.unloadImage(townhall_img);
     const townhall_texture = try rl.loadTextureFromImage(townhall_img);
-    defer rl.unloadTexture(townhall_texture);
+    const townhall_sprites = shared.sheets.SpriteSet.HouseSheet(townhall_texture);
+    defer townhall_sprites.House.deinit();
 
     const lake_img = try rl.loadImage("assets/lake_small.png");
     defer rl.unloadImage(lake_img);
@@ -478,7 +484,7 @@ pub fn runRaylib() anyerror!void {
         try player.draw(assets);
         rl.endMode2D();
 
-        top_menu.draw(screen_width, main_menu_items[0..], &active_menu_item);
+        top_menu.draw(200, main_menu_items[0..], &active_menu_item);
 
         // Draw left sidebar overlay
         // if (sidebar_opened) {
