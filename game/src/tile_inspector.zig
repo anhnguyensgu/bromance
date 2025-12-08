@@ -18,6 +18,11 @@ pub const LandscapeTile = shared.LandscapeTile;
 pub const Frames = shared.Frames;
 pub const drawLandscapeTile = shared.drawLandscapeTile;
 
+// Import the placement system
+const placement = @import("ui/placement.zig");
+const PlacementSystem = placement.PlacementSystem;
+const PlaceableItem = placement.PlaceableItem;
+
 fn tileRect(gridX: i32, gridY: i32, tileSize: i32) rl.Rectangle {
     return rl.Rectangle{
         .x = @as(f32, @floatFromInt(gridX * tileSize)),
@@ -246,13 +251,6 @@ fn drawWorldTiles(tileset: rl.Texture2D, world: shared.World) void {
     }
 }
 
-const TileData = struct { sprite: sheets.SpriteRect, texture: rl.Texture2D };
-
-const PlacedItem = struct {
-    data: TileData,
-    rect: rl.Rectangle,
-};
-
 pub fn main() !void {
     // Initialization
     const screen_width = 800;
@@ -323,26 +321,42 @@ pub fn main() !void {
         .zoom = 1.0,
     };
 
-    const PlacementState = struct {
-        active_item: ?*const TileData = null,
-        is_placing: bool = false,
-        last_placed_col: ?i32 = null,
-        last_placed_row: ?i32 = null,
-    };
-    var placement_state = PlacementState{};
+    // Initialize the modular placement system
+    var placement_system = PlacementSystem.init(.{});
+    placement_system.setBounds(world.tiles_x, world.tiles_y);
+
     var active_menu_idx: ?usize = null;
 
-    var placed_items = try std.ArrayList(PlacedItem).initCapacity(allocator, 8);
+    var placed_items = try std.ArrayList(placement.PlacedItem).initCapacity(allocator, 8);
     defer placed_items.deinit(allocator);
 
     var menu_items_list = try std.ArrayList(MenuItem).initCapacity(allocator, 12);
     defer menu_items_list.deinit(allocator);
 
+    // Storage for heap-allocated PlaceableItem pointers (for cleanup)
+    var placeable_ptrs = try std.ArrayList(*PlaceableItem).initCapacity(allocator, 12);
+    defer {
+        for (placeable_ptrs.items) |ptr| {
+            allocator.destroy(ptr);
+        }
+        placeable_ptrs.deinit(allocator);
+    }
+
     // Helper to add item
     const addMenuItem = struct {
-        fn add(list: *std.ArrayList(MenuItem), alloc: std.mem.Allocator, label: [:0]const u8, sprite: sheets.SpriteRect, tex: rl.Texture2D) !void {
-            const data_ptr = try alloc.create(TileData);
+        fn add(
+            list: *std.ArrayList(MenuItem),
+            ptrs: *std.ArrayList(*PlaceableItem),
+            alloc: std.mem.Allocator,
+            label: [:0]const u8,
+            sprite: sheets.SpriteRect,
+            tex: rl.Texture2D,
+        ) !void {
+            // Allocate PlaceableItem on the heap so pointer remains stable
+            const data_ptr = try alloc.create(PlaceableItem);
             data_ptr.* = .{ .sprite = sprite, .texture = tex };
+            try ptrs.append(alloc, data_ptr);
+
             try list.append(alloc, .{
                 .label = label,
                 .action = saveWorld,
@@ -373,29 +387,19 @@ pub fn main() !void {
             .SpringTiles => |t| switch (t) {
                 .Grass, .Road => |ts| {
                     for (ts.descriptors) |desc| {
-                        try addMenuItem(&menu_items_list, allocator, "Grass", desc, ts.texture2D);
+                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Grass", desc, ts.texture2D);
                     }
                 },
                 else => {},
             },
             .House => |t| {
                 // House
-                try addMenuItem(&menu_items_list, allocator, "House", t.descriptor, t.texture2D);
+                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "House", t.descriptor, t.texture2D);
             },
             .Lake => |t| {
-                try addMenuItem(&menu_items_list, allocator, "Lake", t.descriptor, t.texture2D);
+                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Lake", t.descriptor, t.texture2D);
             },
             else => {},
-        }
-    }
-
-    // Clean up created data pointers at end of scope
-    defer {
-        for (menu_items_list.items) |item| {
-            if (item.data) |ptr| {
-                const tile_data = @as(*TileData, @ptrCast(@alignCast(@constCast(ptr))));
-                allocator.destroy(tile_data);
-            }
         }
     }
 
@@ -420,16 +424,12 @@ pub fn main() !void {
 
         // Placement Logic Inputs - ESC to deselect/cancel placement
         if (rl.isKeyPressed(.escape)) {
-            placement_state.is_placing = false;
-            placement_state.active_item = null;
+            placement_system.cancel();
             active_menu_idx = null;
         }
 
-        // Reset last placed position when mouse button is released
-        if (rl.isMouseButtonReleased(.left)) {
-            placement_state.last_placed_col = null;
-            placement_state.last_placed_row = null;
-        }
+        // Handle mouse release for continuous placement tracking
+        placement_system.handleMouseRelease();
 
         rl.beginDrawing();
         defer rl.endDrawing();
@@ -451,63 +451,14 @@ pub fn main() !void {
             drawWorldTiles(tileset_texture, world);
         }
 
-        // Render placed items
-        for (placed_items.items) |item| {
-            sheets.drawSpriteTo(item.data.texture, item.data.sprite, item.rect);
-        }
+        // Render placed items using the placement system
+        PlacementSystem.renderPlacedItems(placed_items.items);
 
-        // Ghost Rendering & Placement
-        if (placement_state.is_placing) {
-            if (placement_state.active_item) |data| {
-                const mouse = rl.getMousePosition();
-                const world_mouse = rl.getScreenToWorld2D(mouse, camera);
-
-                // Snap to grid (16x16)
-                const col = @divFloor(@as(i32, @intFromFloat(world_mouse.x)), 16);
-                const row = @divFloor(@as(i32, @intFromFloat(world_mouse.y)), 16);
-                const snap_x = @as(f32, @floatFromInt(col)) * 16.0;
-                const snap_y = @as(f32, @floatFromInt(row)) * 16.0;
-
-                const tile_w = @divTrunc(@as(i32, @intFromFloat(data.sprite.width)) + 15, 16);
-                const tile_h = @divTrunc(@as(i32, @intFromFloat(data.sprite.height)) + 15, 16);
-
-                const rect = rl.Rectangle{ .x = snap_x, .y = snap_y, .width = @floatFromInt(tile_w * 16), .height = @floatFromInt(tile_h * 16) };
-
-                // Validity check (bounds)
-                const valid = (col >= 0 and row >= 0 and col + tile_w <= world.tiles_x and row + tile_h <= world.tiles_y);
-
-                // Colored Shadow
-                const shadow_color = if (valid) rl.Color{ .r = 0, .g = 255, .b = 0, .a = 100 } else rl.Color{ .r = 255, .g = 0, .b = 0, .a = 100 };
-                rl.drawRectangleRec(rect, shadow_color);
-
-                // Ghost Sprite (semi-transparent)
-                // We need a drawSprite variant that takes Color, or modify drawSpriteTo to accept color
-                // sheets.drawSpriteTo uses .white hardcoded.
-                // Let's manually draw for ghost to apply alpha
-                const src = rl.Rectangle{
-                    .x = data.sprite.x,
-                    .y = data.sprite.y,
-                    .width = data.sprite.width,
-                    .height = data.sprite.height,
-                };
-                rl.drawTexturePro(
-                    data.texture,
-                    src,
-                    rect,
-                    .{ .x = 0, .y = 0 },
-                    0,
-                    rl.Color{ .r = 255, .g = 255, .b = 255, .a = 150 }, // Ghost alpha
-                );
-
-                // Handle Click to Place (keep placing while holding left mouse button)
-                // Only place if we moved to a new grid cell to avoid duplicates
-                const is_new_cell = (placement_state.last_placed_col != col or placement_state.last_placed_row != row);
-                if (rl.isMouseButtonDown(.left) and valid and is_new_cell) {
-                    // Check if spot is free? For now just place on top
-                    placed_items.append(allocator, .{ .data = data.*, .rect = rect }) catch {};
-                    placement_state.last_placed_col = col;
-                    placement_state.last_placed_row = row;
-                }
+        // Ghost Rendering & Placement using the modular system
+        const result = placement_system.updateAndRender(camera);
+        if (result.placed) {
+            if (placement_system.active_item) |item| {
+                placed_items.append(allocator, .{ .data = item.*, .rect = result.rect }) catch {};
             }
         }
 
@@ -519,7 +470,7 @@ pub fn main() !void {
         const mode_text = if (use_autotile) "Mode: AUTO-TILE (TAB to switch)" else "Mode: EXPLICIT (TAB to switch)";
         rl.drawText(mode_text, 10, 10, 20, rl.Color.dark_blue);
         rl.drawText("Use Arrow Keys to Move Camera, Mouse Wheel to Zoom", 10, screen_height - 30, 20, rl.Color.dark_gray);
-        if (placement_state.is_placing) {
+        if (placement_system.isActive()) {
             rl.drawText("PLACING MODE: Click to place, ESC to cancel", 10, screen_height - 50, 20, rl.Color.dark_purple);
         }
 
@@ -529,23 +480,16 @@ pub fn main() !void {
         // Check if menu selection changed to update placement state
         if (active_menu_idx) |idx| {
             // If we have an active item, enter placement mode for it
-            // We assume idx corresponds to inspector_menu_items order
             if (idx < menu_items_list.items.len) {
                 if (menu_items_list.items[idx].data) |data_ptr| {
-                    const tile_data = @as(*const TileData, @ptrCast(@alignCast(data_ptr)));
-                    placement_state.active_item = tile_data;
-                    placement_state.is_placing = true;
-                    // Optional: Reset active_menu_idx if we want to deselect in UI,
-                    // or keep it to show what's selected.
-                    // If we keep it, we need to make sure we don't re-trigger logic inadvertently,
-                    // but setting active_item repeatedly to same is fine.
+                    const placeable_item = @as(*const PlaceableItem, @ptrCast(@alignCast(data_ptr)));
+                    placement_system.startPlacing(placeable_item);
                 }
             }
         } else {
             // If menu has no selection (e.g. user toggled off), clear placement state
             // Same behavior as pressing ESC
-            placement_state.is_placing = false;
-            placement_state.active_item = null;
+            placement_system.cancel();
         }
     }
 }
@@ -558,8 +502,8 @@ fn drawMenuItem(item: *const MenuItem, rect: rl.Rectangle, active: bool, hovered
     }
 
     if (item.data) |data| {
-        const tile_data = @as(*const TileData, @ptrCast(@alignCast(data)));
-        sheets.drawSpriteTo(tile_data.texture, tile_data.sprite, rect);
+        const placeable_item = @as(*const PlaceableItem, @ptrCast(@alignCast(data)));
+        sheets.drawSpriteTo(placeable_item.texture, placeable_item.sprite, rect);
     } else {
         const text_x = @as(i32, @intFromFloat(rect.x + 10));
         const text_y = @as(i32, @intFromFloat(rect.y + (rect.height - 20) / 2));
