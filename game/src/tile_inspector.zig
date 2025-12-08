@@ -23,6 +23,16 @@ const placement = @import("ui/placement.zig");
 const PlacementSystem = placement.PlacementSystem;
 const PlaceableItem = placement.PlaceableItem;
 
+// Import the new dynamic Map system
+const editor_map = shared.editor_map;
+const Map = editor_map.Map;
+const TileId = editor_map.TileId;
+
+// Global editor map reference for save callback
+var g_editor_map: ?*Map = null;
+var g_allocator: ?std.mem.Allocator = null;
+var g_placed_items: ?*std.ArrayList(placement.PlacedItem) = null;
+
 fn tileRect(gridX: i32, gridY: i32, tileSize: i32) rl.Rectangle {
     return rl.Rectangle{
         .x = @as(f32, @floatFromInt(gridX * tileSize)),
@@ -305,6 +315,20 @@ pub fn main() !void {
     world.tiles_x = @divTrunc(@as(i32, @intFromFloat(world.width)), 16);
     world.tiles_y = @divTrunc(@as(i32, @intFromFloat(world.height)), 16);
 
+    // Initialize the new dynamic Map for editing
+    var editor_map_instance = try Map.initWithTileSize(
+        allocator,
+        @intCast(world.tiles_x),
+        @intCast(world.tiles_y),
+        16,
+        16,
+    );
+    defer editor_map_instance.deinit();
+
+    // Set global reference for save callback
+    g_editor_map = &editor_map_instance;
+    g_allocator = allocator;
+
     // Initialize auto-tile map from loaded world (uses world's tiles grid if present)
     var auto_tile_map = try MultiLayerTileMap.initFromWorld(allocator, tileset_texture, world);
     defer auto_tile_map.deinit();
@@ -329,6 +353,7 @@ pub fn main() !void {
 
     var placed_items = try std.ArrayList(placement.PlacedItem).initCapacity(allocator, 8);
     defer placed_items.deinit(allocator);
+    g_placed_items = &placed_items;
 
     var menu_items_list = try std.ArrayList(MenuItem).initCapacity(allocator, 12);
     defer menu_items_list.deinit(allocator);
@@ -349,12 +374,13 @@ pub fn main() !void {
             ptrs: *std.ArrayList(*PlaceableItem),
             alloc: std.mem.Allocator,
             label: [:0]const u8,
+            item_type: []const u8,
             sprite: sheets.SpriteRect,
             tex: rl.Texture2D,
         ) !void {
             // Allocate PlaceableItem on the heap so pointer remains stable
             const data_ptr = try alloc.create(PlaceableItem);
-            data_ptr.* = .{ .sprite = sprite, .texture = tex };
+            data_ptr.* = .{ .sprite = sprite, .texture = tex, .item_type = item_type };
             try ptrs.append(alloc, data_ptr);
 
             try list.append(alloc, .{
@@ -385,19 +411,24 @@ pub fn main() !void {
     for (frames) |g| {
         switch (g) {
             .SpringTiles => |t| switch (t) {
-                .Grass, .Road => |ts| {
+                .Grass => |ts| {
                     for (ts.descriptors) |desc| {
-                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Grass", desc, ts.texture2D);
+                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Grass", "Tile", desc, ts.texture2D);
+                    }
+                },
+                .Road => |ts| {
+                    for (ts.descriptors) |desc| {
+                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Road", "Road", desc, ts.texture2D);
                     }
                 },
                 else => {},
             },
             .House => |t| {
                 // House
-                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "House", t.descriptor, t.texture2D);
+                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "House", "House", t.descriptor, t.texture2D);
             },
             .Lake => |t| {
-                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Lake", t.descriptor, t.texture2D);
+                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Lake", "Lake", t.descriptor, t.texture2D);
             },
             else => {},
         }
@@ -426,6 +457,11 @@ pub fn main() !void {
         if (rl.isKeyPressed(.escape)) {
             placement_system.cancel();
             active_menu_idx = null;
+        }
+
+        // Save map with Ctrl+S
+        if (rl.isKeyDown(.left_control) and rl.isKeyPressed(.s)) {
+            saveWorld();
         }
 
         // Handle mouse release for continuous placement tracking
@@ -458,7 +494,24 @@ pub fn main() !void {
         const result = placement_system.updateAndRender(camera);
         if (result.placed) {
             if (placement_system.active_item) |item| {
-                placed_items.append(allocator, .{ .data = item.*, .rect = result.rect }) catch {};
+                // Check if an item already exists at this position to prevent duplicates
+                var already_exists = false;
+                for (placed_items.items) |existing| {
+                    if (existing.rect.x == result.rect.x and existing.rect.y == result.rect.y) {
+                        already_exists = true;
+                        break;
+                    }
+                }
+
+                if (!already_exists) {
+                    placed_items.append(allocator, .{ .data = item.*, .rect = result.rect }) catch {};
+
+                    // Also update the editor map with the placed tile
+                    if (result.col >= 0 and result.row >= 0) {
+                        const tile_id: TileId = 1; // Default tile ID for placed items
+                        editor_map_instance.setTile(@intCast(result.col), @intCast(result.row), tile_id);
+                    }
+                }
             }
         }
 
@@ -469,10 +522,15 @@ pub fn main() !void {
         // Show current mode and controls
         const mode_text = if (use_autotile) "Mode: AUTO-TILE (TAB to switch)" else "Mode: EXPLICIT (TAB to switch)";
         rl.drawText(mode_text, 10, 10, 20, rl.Color.dark_blue);
-        rl.drawText("Use Arrow Keys to Move Camera, Mouse Wheel to Zoom", 10, screen_height - 30, 20, rl.Color.dark_gray);
+        rl.drawText("Arrow Keys: Move | Scroll: Zoom | Ctrl+S: Save", 10, screen_height - 30, 20, rl.Color.dark_gray);
         if (placement_system.isActive()) {
             rl.drawText("PLACING MODE: Click to place, ESC to cancel", 10, screen_height - 50, 20, rl.Color.dark_purple);
         }
+
+        // Show map dimensions
+        var dim_buf: [64:0]u8 = undefined;
+        _ = std.fmt.bufPrint(&dim_buf, "Map: {}x{} tiles", .{ editor_map_instance.width, editor_map_instance.height }) catch {};
+        rl.drawText(&dim_buf, screen_width - 150, 10, 16, rl.Color.dark_gray);
 
         // Draw Menu
         menu.draw(world.width, menu_items_list.items, &active_menu_idx);
@@ -494,7 +552,69 @@ pub fn main() !void {
     }
 }
 
-fn saveWorld() void {}
+fn saveWorld() void {
+    const map = g_editor_map orelse {
+        std.debug.print("No map to save\n", .{});
+        return;
+    };
+    const items = g_placed_items orelse {
+        std.debug.print("No placed items to save\n", .{});
+        return;
+    };
+
+    // Create file
+    const file = std.fs.cwd().createFile("assets/world_output.json", .{}) catch |err| {
+        std.debug.print("Failed to create file: {}\n", .{err});
+        return;
+    };
+    defer file.close();
+
+    // Build JSON manually
+    var buffer: [1024 * 1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buffer);
+    const writer = fbs.writer();
+
+    writer.writeAll("{\n") catch return;
+    writer.print("  \"world\": {{\n", .{}) catch return;
+    writer.print("    \"width\": {},\n", .{map.width * map.tile_width}) catch return;
+    writer.print("    \"height\": {},\n", .{map.height * map.tile_height}) catch return;
+    writer.print("    \"tiles_x\": {},\n", .{map.width}) catch return;
+    writer.print("    \"tiles_y\": {}\n", .{map.height}) catch return;
+    writer.writeAll("  },\n") catch return;
+
+    // Write placed items as buildings
+    writer.writeAll("  \"buildings\": [\n") catch return;
+    for (items.items, 0..) |item, i| {
+        const tile_x = @divFloor(@as(i32, @intFromFloat(item.rect.x)), @as(i32, @intCast(map.tile_width)));
+        const tile_y = @divFloor(@as(i32, @intFromFloat(item.rect.y)), @as(i32, @intCast(map.tile_height)));
+        const width_tiles = @divFloor(@as(i32, @intFromFloat(item.rect.width)), @as(i32, @intCast(map.tile_width)));
+        const height_tiles = @divFloor(@as(i32, @intFromFloat(item.rect.height)), @as(i32, @intCast(map.tile_height)));
+
+        writer.writeAll("    {\n") catch return;
+        writer.print("      \"type\": \"{s}\",\n", .{item.data.item_type}) catch return;
+        writer.print("      \"tile_x\": {},\n", .{tile_x}) catch return;
+        writer.print("      \"tile_y\": {},\n", .{tile_y}) catch return;
+        writer.print("      \"width_tiles\": {},\n", .{width_tiles}) catch return;
+        writer.print("      \"height_tiles\": {},\n", .{height_tiles}) catch return;
+        writer.print("      \"sprite_width\": {},\n", .{@as(i32, @intFromFloat(item.data.sprite.width))}) catch return;
+        writer.print("      \"sprite_height\": {}\n", .{@as(i32, @intFromFloat(item.data.sprite.height))}) catch return;
+        writer.writeAll("    }") catch return;
+        if (i < items.items.len - 1) {
+            writer.writeAll(",") catch return;
+        }
+        writer.writeAll("\n") catch return;
+    }
+    writer.writeAll("  ]\n") catch return;
+    writer.writeAll("}\n") catch return;
+
+    // Write to file
+    _ = file.writeAll(fbs.getWritten()) catch |err| {
+        std.debug.print("Failed to write file: {}\n", .{err});
+        return;
+    };
+
+    std.debug.print("World saved to assets/world_output.json ({} items)\n", .{items.items.len});
+}
 
 fn drawMenuItem(item: *const MenuItem, rect: rl.Rectangle, active: bool, hovered: bool) void {
     if (active or hovered) {

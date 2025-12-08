@@ -15,6 +15,7 @@ const t = @import("tiles/terrain.zig");
 pub const TerrainType = t.TerrainType;
 
 pub const menu = @import("ui/menu.zig");
+pub const editor_map = @import("map/editor_map.zig");
 
 pub const PlayerState = struct {
     x: f32,

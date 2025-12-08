@@ -3,10 +3,11 @@ const rl = @import("raylib");
 const shared = @import("shared");
 const sheets = shared.sheets;
 
-/// Data representing a placeable item (sprite + texture)
+/// Data representing a placeable item (sprite + texture + type)
 pub const PlaceableItem = struct {
     sprite: sheets.SpriteRect,
     texture: rl.Texture2D,
+    item_type: []const u8 = "Tile",
 };
 
 /// A placed item in the world
