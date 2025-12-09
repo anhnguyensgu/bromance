@@ -111,10 +111,14 @@ pub fn main() !void {
     const tileset_texture = try rl.loadTextureFromImage(tileset_img);
     defer rl.unloadTexture(tileset_texture);
 
+    // Use point filtering to prevent pixel bleeding between tiles
+    rl.setTextureFilter(tileset_texture, .point);
+
     const house_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
     defer rl.unloadImage(house_img);
     const house_texture = try rl.loadTextureFromImage(house_img);
     defer rl.unloadTexture(house_texture);
+    rl.setTextureFilter(house_texture, .point);
 
     const house_sprites = shared.sheets.SpriteSet.HouseSheet(house_texture);
     defer house_sprites.House.deinit();
@@ -122,6 +126,7 @@ pub fn main() !void {
     const lake_img = try rl.loadImage("assets/lake_small.png");
     defer rl.unloadImage(lake_img);
     const lake_texture = try rl.loadTextureFromImage(lake_img);
+    rl.setTextureFilter(lake_texture, .point);
     const lake_sprites = shared.sheets.SpriteSet.LakeSheet(lake_texture);
     defer lake_sprites.Lake.deinit();
 
@@ -297,8 +302,14 @@ pub fn main() !void {
         if (mouse_pos.x > SIDEBAR_WIDTH) {
             const wheel = rl.getMouseWheelMove();
             if (wheel != 0) {
-                camera.zoom += wheel * 0.1;
-                if (camera.zoom < 0.1) camera.zoom = 0.1;
+                //Todo: using zig math to clamp the zoom
+                const zoom_speed: f32 = 0.1;
+                const min_zoom: f32 = 0.5;
+                const max_zoom: f32 = 4.0;
+
+                camera.zoom += wheel * zoom_speed;
+                if (camera.zoom < min_zoom) camera.zoom = min_zoom;
+                if (camera.zoom > max_zoom) camera.zoom = max_zoom;
             }
         }
 
@@ -321,7 +332,12 @@ pub fn main() !void {
 
         rl.clearBackground(rl.Color.ray_white);
 
-        rl.beginMode2D(camera);
+        // Use a render camera snapped to pixel grid (camera itself stays smooth)
+        var render_camera = camera;
+        render_camera.target.x = @floor(camera.target.x * camera.zoom) / camera.zoom;
+        render_camera.target.y = @floor(camera.target.y * camera.zoom) / camera.zoom;
+
+        rl.beginMode2D(render_camera);
         // Draw the raw tileset first as a background reference (to the right)
         rl.drawTexture(tileset_texture, 100, 0, .white);
 
@@ -334,7 +350,7 @@ pub fn main() !void {
         PlacementSystem.renderPlacedItems(placed_items.items);
 
         // Ghost Rendering & Placement using the modular system
-        const result = placement_system.updateAndRender(camera);
+        const result = placement_system.updateAndRender(render_camera);
         if (result.placed) {
             if (placement_system.active_item) |item| {
                 if (std.mem.eql(u8, item.item_type, "Eraser")) {
