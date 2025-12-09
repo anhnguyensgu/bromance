@@ -19,7 +19,7 @@ pub const Frames = shared.Frames;
 pub const drawLandscapeTile = shared.drawLandscapeTile;
 
 // Import the placement system
-const placement = @import("ui/placement.zig");
+const placement = shared.placement;
 const PlacementSystem = placement.PlacementSystem;
 const PlaceableItem = placement.PlaceableItem;
 
@@ -27,6 +27,9 @@ const PlaceableItem = placement.PlaceableItem;
 const editor_map = shared.editor_map;
 const Map = editor_map.Map;
 const TileId = editor_map.TileId;
+
+// Shared GhostLayer for applying placement results
+const GhostLayer = shared.ghost_layer.GhostLayer;
 
 // Global editor map reference for save callback
 var g_editor_map: ?*Map = null;
@@ -219,7 +222,11 @@ pub fn main() !void {
         },
     }, .{
         .SpringTiles = .{
-            .Road = LandscapeTile.init(tileset_texture, 8.0, 4.0),
+            .Road = LandscapeTile.init(tileset_texture, 8.0, 12.0),
+        },
+    }, .{
+        .SpringTiles = .{
+            .Rock = LandscapeTile.init(tileset_texture, 8.0, 4.0),
         },
     }, house_sprites, lake_sprites, menu.sprite_set };
 
@@ -280,6 +287,12 @@ pub fn main() !void {
             }
         }
     }
+
+    var ghost_layer = GhostLayer{
+        .allocator = allocator,
+        .placed_items = &placed_items,
+        .editor_map = &editor_map_instance,
+    };
 
     while (!rl.windowShouldClose()) {
         // Camera Controls
@@ -344,35 +357,7 @@ pub fn main() !void {
         const result = placement_system.updateAndRender(render_camera);
         if (result.placed) {
             if (placement_system.active_item) |item| {
-                if (std.mem.eql(u8, item.item_type, "Eraser")) {
-                    // Eraser Logic: Remove all items colliding with the eraser cursor
-                    var i: usize = placed_items.items.len;
-                    while (i > 0) {
-                        i -= 1;
-                        if (rl.checkCollisionRecs(placed_items.items[i].rect, result.rect)) {
-                            _ = placed_items.orderedRemove(i);
-                        }
-                    }
-                } else {
-                    // Normal Placement Logic
-                    var already_exists = false;
-                    for (placed_items.items) |existing| {
-                        if (rl.checkCollisionRecs(existing.rect, result.rect)) {
-                            already_exists = true;
-                            break;
-                        }
-                    }
-
-                    if (!already_exists) {
-                        placed_items.append(allocator, .{ .data = item.*, .rect = result.rect }) catch {};
-
-                        // Also update the editor map with the placed tile
-                        if (result.col >= 0 and result.row >= 0) {
-                            const tile_id: TileId = 1; // Default tile ID for placed items
-                            editor_map_instance.setTile(@intCast(result.col), @intCast(result.row), tile_id);
-                        }
-                    }
-                }
+                ghost_layer.applyPlacement(item, result);
             }
         }
 

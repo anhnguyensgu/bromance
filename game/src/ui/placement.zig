@@ -1,7 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("shared");
-const sheets = shared.sheets;
+const sheets = @import("../tiles/sheets.zig");
 
 /// Data representing a placeable item (sprite + texture + type)
 pub const PlaceableItem = struct {
