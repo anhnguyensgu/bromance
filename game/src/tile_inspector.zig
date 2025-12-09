@@ -36,15 +36,6 @@ var g_placed_items: ?*std.ArrayList(placement.PlacedItem) = null;
 // Sidebar layout constants
 const SIDEBAR_WIDTH: f32 = 250.0;
 
-fn tileRect(gridX: i32, gridY: i32, tileSize: i32) rl.Rectangle {
-    return rl.Rectangle{
-        .x = @as(f32, @floatFromInt(gridX * tileSize)),
-        .y = @as(f32, @floatFromInt(gridY * tileSize)),
-        .width = @as(f32, @floatFromInt(tileSize)),
-        .height = @as(f32, @floatFromInt(tileSize)),
-    };
-}
-
 fn drawGrassBackground(grass: Frames, world: shared.World) void {
     const tile_w: f32 = 16.0;
     const tile_h: f32 = 16.0;
