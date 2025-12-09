@@ -1,3 +1,4 @@
+const std = @import("std");
 const rl = @import("raylib");
 const shared = @import("../shared.zig");
 const sheets = shared.sheets;
@@ -41,6 +42,7 @@ pub const Menu = struct {
     sprite_set: shared.sheets.SpriteSet,
     layout: MenuLayout,
     is_open: bool = false,
+    scroll_offset: f32 = 0, // Scroll offset for sidebar mode
 
     pub fn init(texture: rl.Texture2D, layout: MenuLayout) Menu {
         return .{
@@ -183,5 +185,135 @@ pub const Menu = struct {
         }
 
         rl.drawLine(@intFromFloat(pos_x), @intFromFloat(total_height_f), @intFromFloat(pos_x + menu_width), @intFromFloat(total_height_f), .red);
+    }
+
+    /// Draw menu in fixed sidebar mode (always visible, no toggle) with scroll support
+    pub fn drawAsSidebar(self: *Self, sidebar_width: f32, screen_height: i32, menu_items: []const MenuItem, active_item: ?*?usize) void {
+        const spacing = 8.0;
+        const tile_size: f32 = 48.0;
+        const side_padding: f32 = 15.0;
+        const top_padding: f32 = 80.0;
+        const bottom_padding: f32 = 80.0; // Space for help text
+        const cols: usize = 4;
+        const scroll_speed: f32 = 30.0;
+
+        // Calculate content height
+        const total_rows = (menu_items.len + cols - 1) / cols;
+        const content_height = @as(f32, @floatFromInt(total_rows)) * (tile_size + spacing);
+        const visible_height = @as(f32, @floatFromInt(screen_height)) - top_padding - bottom_padding;
+        const max_scroll = @max(0, content_height - visible_height);
+
+        // Draw sidebar background
+        rl.drawRectangle(0, 0, @intFromFloat(sidebar_width), screen_height, rl.Color{ .r = 40, .g = 44, .b = 52, .a = 255 });
+        rl.drawLine(@intFromFloat(sidebar_width), 0, @intFromFloat(sidebar_width), screen_height, rl.Color{ .r = 60, .g = 64, .b = 72, .a = 255 });
+
+        // Draw title
+        rl.drawText("TOOLS", @intFromFloat(side_padding), 20, 24, rl.Color.white);
+        rl.drawLine(@intFromFloat(side_padding), 50, @intFromFloat(sidebar_width - side_padding), 50, rl.Color{ .r = 80, .g = 84, .b = 92, .a = 255 });
+
+        const mouse = rl.getMousePosition();
+        const clicked = rl.isMouseButtonPressed(rl.MouseButton.left);
+
+        // Handle scroll when mouse is over sidebar
+        if (mouse.x < sidebar_width and max_scroll > 0) {
+            const wheel = rl.getMouseWheelMove();
+            if (wheel != 0) {
+                self.scroll_offset -= wheel * scroll_speed;
+                self.scroll_offset = std.math.clamp(self.scroll_offset, 0, max_scroll);
+            }
+        }
+
+        // Draw menu items with scroll offset
+        for (menu_items, 0..) |item, idx| {
+            const col = idx % cols;
+            const row = idx / cols;
+
+            const x = side_padding + @as(f32, @floatFromInt(col)) * (tile_size + spacing);
+            const y = top_padding + @as(f32, @floatFromInt(row)) * (tile_size + spacing) - self.scroll_offset;
+
+            // Skip items outside visible area
+            if (y + tile_size < top_padding or y > @as(f32, @floatFromInt(screen_height)) - bottom_padding) {
+                continue;
+            }
+
+            const rect = rl.Rectangle{
+                .x = x,
+                .y = y,
+                .width = tile_size,
+                .height = tile_size,
+            };
+
+            const hovered = rl.checkCollisionPointRec(mouse, rect) and y >= top_padding - 5;
+
+            var is_active = false;
+            if (active_item) |ptr| {
+                if (ptr.*) |current| {
+                    is_active = (current == idx);
+                }
+            }
+
+            // Background for item
+            if (is_active) {
+                rl.drawRectangleRec(rect, rl.Color{ .r = 70, .g = 130, .b = 180, .a = 255 });
+            } else if (hovered) {
+                rl.drawRectangleRec(rect, rl.Color{ .r = 60, .g = 64, .b = 72, .a = 255 });
+            } else {
+                rl.drawRectangleRec(rect, rl.Color{ .r = 50, .g = 54, .b = 62, .a = 255 });
+            }
+
+            // Border
+            rl.drawRectangleLinesEx(rect, 1, rl.Color{ .r = 80, .g = 84, .b = 92, .a = 255 });
+
+            // Draw the item content
+            item.draw(rect, is_active, hovered);
+
+            // Handle click
+            if (hovered and clicked) {
+                if (active_item) |ptr| {
+                    if (ptr.*) |current| {
+                        if (current == idx) {
+                            ptr.* = null;
+                        } else {
+                            ptr.* = idx;
+                        }
+                    } else {
+                        ptr.* = idx;
+                    }
+                }
+            }
+        }
+
+        // Draw scrollbar if needed
+        if (max_scroll > 0) {
+            const scrollbar_width: f32 = 6;
+            const scrollbar_x = sidebar_width - scrollbar_width - 4;
+            const scrollbar_track_y = top_padding;
+            const scrollbar_track_height = visible_height;
+
+            // Draw track
+            rl.drawRectangle(
+                @intFromFloat(scrollbar_x),
+                @intFromFloat(scrollbar_track_y),
+                @intFromFloat(scrollbar_width),
+                @intFromFloat(scrollbar_track_height),
+                rl.Color{ .r = 50, .g = 54, .b = 62, .a = 255 },
+            );
+
+            // Draw thumb
+            const thumb_height = @max(20, (visible_height / content_height) * scrollbar_track_height);
+            const thumb_y = scrollbar_track_y + (self.scroll_offset / max_scroll) * (scrollbar_track_height - thumb_height);
+            rl.drawRectangle(
+                @intFromFloat(scrollbar_x),
+                @intFromFloat(thumb_y),
+                @intFromFloat(scrollbar_width),
+                @intFromFloat(thumb_height),
+                rl.Color{ .r = 100, .g = 104, .b = 112, .a = 255 },
+            );
+        }
+
+        // Draw help text at bottom
+        const help_y = screen_height - 60;
+        rl.drawText("Ctrl+S: Save", @intFromFloat(side_padding), help_y, 14, rl.Color{ .r = 150, .g = 150, .b = 150, .a = 255 });
+        rl.drawText("ESC: Cancel", @intFromFloat(side_padding), help_y + 18, 14, rl.Color{ .r = 150, .g = 150, .b = 150, .a = 255 });
     }
 };
