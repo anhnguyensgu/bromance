@@ -23,7 +23,7 @@ pub const GhostLayer = struct {
     /// - Otherwise, add a new placed item if there isn't already
     ///   one at that rect, and update the editor map's tile grid.
     pub fn applyPlacement(self: *Self, item: *const PlaceableItem, result: placement.PlacementResult) void {
-        if (std.mem.eql(u8, item.item_type, "Eraser")) {
+        if (item.item_type == .Eraser) {
             // Eraser Logic: Remove all items colliding with the eraser cursor
             var i: usize = self.placed_items.items.len;
             while (i > 0) {

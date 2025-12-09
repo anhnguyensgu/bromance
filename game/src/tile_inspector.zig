@@ -192,7 +192,7 @@ pub fn main() !void {
             ptrs: *std.ArrayList(*PlaceableItem),
             alloc: std.mem.Allocator,
             label: [:0]const u8,
-            item_type: []const u8,
+            item_type: placement.ItemType,
             sprite: sheets.SpriteRect,
             tex: rl.Texture2D,
         ) !void {
@@ -235,22 +235,22 @@ pub fn main() !void {
             .SpringTiles => |t| switch (t) {
                 .Grass => |ts| {
                     for (ts.descriptors) |desc| {
-                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Grass", "Tile", desc, ts.texture2D);
+                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Grass", .Tile, desc, ts.texture2D);
                     }
                 },
                 .Road => |ts| {
                     for (ts.descriptors) |desc| {
-                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Road", "Road", desc, ts.texture2D);
+                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Road", .Tile, desc, ts.texture2D);
                     }
                 },
                 else => {},
             },
             .House => |t| {
                 // House
-                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "House", "House", t.descriptor, t.texture2D);
+                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "House", .House, t.descriptor, t.texture2D);
             },
             .Lake => |t| {
-                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Lake", "Lake", t.descriptor, t.texture2D);
+                try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Lake", .Lake, t.descriptor, t.texture2D);
             },
             else => {},
         }
@@ -262,7 +262,7 @@ pub fn main() !void {
     const eraser_tex = try rl.loadTextureFromImage(eraser_img);
     defer rl.unloadTexture(eraser_tex);
 
-    try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Eraser", "Eraser", .{ .x = 0, .y = 0, .width = 16, .height = 16 }, eraser_tex);
+    try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Eraser", .Eraser, .{ .x = 0, .y = 0, .width = 16, .height = 16 }, eraser_tex);
 
     // Restore placed items from loaded world buildings
     const w_tile_w = world.width / @as(f32, @floatFromInt(world.tiles_x));
@@ -274,7 +274,7 @@ pub fn main() !void {
         for (menu_items_list.items) |menu_item| {
             if (menu_item.data) |data_ptr| {
                 const placeable = @as(*const PlaceableItem, @ptrCast(@alignCast(data_ptr)));
-                if (std.mem.eql(u8, placeable.item_type, b_type_name)) {
+                if (std.mem.eql(u8, placeable.item_type.toString(), b_type_name)) {
                     // Found match, create placed item
                     const px = @as(f32, @floatFromInt(b.tile_x)) * w_tile_w;
                     const py = @as(f32, @floatFromInt(b.tile_y)) * w_tile_h;
@@ -435,7 +435,7 @@ fn saveWorld() void {
         const height_tiles = @divFloor(@as(i32, @intFromFloat(item.rect.height)), @as(i32, @intCast(map.tile_height)));
 
         json_buildings.appendAssumeCapacity(.{
-            .type = item.data.item_type,
+            .type = item.data.item_type.toString(),
             .tile_x = tile_x,
             .tile_y = tile_y,
             .width_tiles = width_tiles,
