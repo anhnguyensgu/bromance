@@ -57,6 +57,8 @@ pub const Building = struct {
     tile_y: i32,
     width_tiles: i32,
     height_tiles: i32,
+    sprite_x: f32 = 0,
+    sprite_y: f32 = 0,
     sprite_width: f32,
     sprite_height: f32,
 };
@@ -127,6 +129,9 @@ pub const World = struct {
             const tile_y = @as(i32, @intCast(obj.get("tile_y").?.integer));
             const width_tiles = @as(i32, @intCast(obj.get("width_tiles").?.integer));
             const height_tiles = @as(i32, @intCast(obj.get("height_tiles").?.integer));
+            // sprite_x and sprite_y are optional (for backwards compatibility)
+            const sprite_x: f32 = if (obj.get("sprite_x")) |v| @as(f32, @floatFromInt(v.integer)) else 0;
+            const sprite_y: f32 = if (obj.get("sprite_y")) |v| @as(f32, @floatFromInt(v.integer)) else 0;
             const sprite_width = @as(f32, @floatFromInt(obj.get("sprite_width").?.integer));
             const sprite_height = @as(f32, @floatFromInt(obj.get("sprite_height").?.integer));
 
@@ -141,6 +146,8 @@ pub const World = struct {
                 .tile_y = tile_y,
                 .width_tiles = width_tiles,
                 .height_tiles = height_tiles,
+                .sprite_x = sprite_x,
+                .sprite_y = sprite_y,
                 .sprite_width = sprite_width,
                 .sprite_height = sprite_height,
             };
@@ -274,10 +281,12 @@ pub const World = struct {
             const building_w = @as(f32, @floatFromInt(building.width_tiles)) * tile_w;
             const building_h = @as(f32, @floatFromInt(building.height_tiles)) * tile_h;
 
-            const building_left = building_x;
-            const building_right = building_x + building_w;
-            const building_top = building_y;
-            const building_bottom = building_y + building_h;
+            // Clamp building bounds to the world so we don't get
+            // spurious collisions when a building sits on the edge.
+            const building_left = @max(0.0, building_x);
+            const building_top = @max(0.0, building_y);
+            const building_right = @min(self.width, building_x + building_w);
+            const building_bottom = @min(self.height, building_y + building_h);
 
             // AABB collision detection
             const overlaps_x = player_right > building_left and player_left < building_right;
@@ -300,6 +309,42 @@ pub const World = struct {
         return @as(f32, @floatFromInt(tile_y)) * tile_h;
     }
 };
+
+/// Draw a grass background with a bordered edge, using the same layout
+/// as the tile inspector. This keeps main.zig and tile_inspector.zig
+/// using a single shared implementation.
+pub fn drawGrassBackground(grass: Frames, world: World) void {
+    const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
+    const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
+
+    var ty: i32 = 0;
+    while (ty < world.tiles_y) : (ty += 1) {
+        var tx: i32 = 0;
+        while (tx < world.tiles_x) : (tx += 1) {
+            const x = @as(f32, @floatFromInt(tx)) * tile_w;
+            const y = @as(f32, @floatFromInt(ty)) * tile_h;
+
+            const dir: LandscapeTile.Dir = blk: {
+                const is_left = tx == 0;
+                const is_right = tx == world.tiles_x - 1;
+                const is_top = ty == 0;
+                const is_bottom = ty == world.tiles_y - 1;
+
+                if (is_left and is_top) break :blk .TopLeftCorner;
+                if (is_right and is_top) break :blk .TopRightCorner;
+                if (is_left and is_bottom) break :blk .BottomLeftCorner;
+                if (is_right and is_bottom) break :blk .BottomRightCorner;
+                if (is_left) break :blk .Left;
+                if (is_right) break :blk .Right;
+                if (is_top) break :blk .Top;
+                if (is_bottom) break :blk .Bottom;
+                break :blk .Center;
+            };
+
+            drawLandscapeTile(grass, dir, x, y);
+        }
+    }
+}
 
 pub const Room = struct {
     const Self = @This();

@@ -1,28 +1,21 @@
 {
   "world": {
     "width": 640,
-    "height": 384,
+    "height": 640,
     "tiles_x": 40,
-    "tiles_y": 24
+    "tiles_y": 40
   },
   "buildings": [
     {
       "type": "Lake",
-      "tile_x": 20,
-      "tile_y": 5,
+      "tile_x": 9,
+      "tile_y": 13,
       "width_tiles": 19,
       "height_tiles": 18,
+      "sprite_x": 0,
+      "sprite_y": 0,
       "sprite_width": 300,
       "sprite_height": 284
-    },
-    {
-      "type": "House",
-      "tile_x": 8,
-      "tile_y": 14,
-      "width_tiles": 5,
-      "height_tiles": 7,
-      "sprite_width": 74,
-      "sprite_height": 112
     }
   ]
 }

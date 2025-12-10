@@ -37,7 +37,7 @@ const UdpEchoServer = struct {
         _ = try posix.fcntl(sock, posix.F.SETFL, flags);
 
         // Load world data for collision detection
-        const world = try shared.World.loadFromFile(allocator, "assets/world.json");
+        const world = try shared.World.loadFromFile(allocator, "assets/world_output.json");
 
         const now: i64 = @intCast(std.time.nanoTimestamp());
 
@@ -219,8 +219,12 @@ const UdpEchoServer = struct {
             .Right => new_pos.x += move_amount,
         }
 
-        new_pos.x = std.math.clamp(new_pos.x, 0.0, self.world.width);
-        new_pos.y = std.math.clamp(new_pos.y, 0.0, self.world.height);
+        // Clamp so the whole player stays inside the world bounds,
+        // matching the client-side prediction & reconciliation logic.
+        const max_x = @max(0.0, self.world.width - PLAYER_SIZE);
+        const max_y = @max(0.0, self.world.height - PLAYER_SIZE);
+        new_pos.x = std.math.clamp(new_pos.x, 0.0, max_x);
+        new_pos.y = std.math.clamp(new_pos.y, 0.0, max_y);
 
         const collision = self.world.checkBuildingCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE);
 

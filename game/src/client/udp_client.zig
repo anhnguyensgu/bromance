@@ -168,12 +168,15 @@ pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand, world: shared.
         .Right => new_pos.x += move_amount,
     }
 
-    // Clamp to world bounds
-    new_pos.x = std.math.clamp(new_pos.x, 0.0, world.width);
-    new_pos.y = std.math.clamp(new_pos.y, 0.0, world.height);
+    const PLAYER_SIZE: f32 = 32.0;
+    const max_x = @max(0.0, world.width - PLAYER_SIZE);
+    const max_y = @max(0.0, world.height - PLAYER_SIZE);
+
+    // Clamp so the whole player stays inside the world
+    new_pos.x = std.math.clamp(new_pos.x, 0.0, max_x);
+    new_pos.y = std.math.clamp(new_pos.y, 0.0, max_y);
 
     // Check collision at new position
-    const PLAYER_SIZE: f32 = 32.0;
     const collision = world.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
 
     if (!collision) {

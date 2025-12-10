@@ -13,8 +13,8 @@ const command = @import("movement/command.zig");
 const MovementCommand = @import("movement/command.zig").MovementCommand;
 const MoveDirection = command.MoveDirection;
 const shared = @import("shared.zig");
-const tiles = @import("tiles/layer.zig");
-const MultiLayerTileMap = tiles.MultiLayerTileMap;
+const LandscapeTile = shared.LandscapeTile;
+const Frames = shared.Frames;
 const ui_menu = @import("ui/menu.zig");
 const MenuItem = ui_menu.MenuItem;
 const Menu = ui_menu.Menu;
@@ -42,62 +42,41 @@ fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32,
     camera.target = .init(cam_target_x, cam_target_y);
 }
 
-fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, terrain_texture: rl.Texture2D, ruins_texture: rl.Texture2D, world: shared.World) void {
-    // Draw all buildings from map configuration
+fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, world: shared.World) void {
+    // Calculate tile size in world pixels
+    const tile_w = world.width / @as(f32, @floatFromInt(world.tiles_x));
+    const tile_h = world.height / @as(f32, @floatFromInt(world.tiles_y));
+
+    // Draw all buildings from map configuration using sprite data from JSON
     for (world.buildings) |building| {
         // Convert tile coordinates to world pixels
         const building_x = world.tileToWorldX(building.tile_x);
         const building_y = world.tileToWorldY(building.tile_y);
 
-        switch (building.building_type) {
-            .Townhall => {
-                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
-                const building_source = rl.Rectangle{ .x = 150, .y = 0, .width = @floatFromInt(@divTrunc(townhall_texture.width, 3)), .height = @floatFromInt(townhall_texture.height) };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
-                rl.drawTexturePro(townhall_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
-            },
-            .Lake => {
-                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
-                const building_source = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(lake_texture.width), .height = @floatFromInt(lake_texture.height) };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
-                rl.drawTexturePro(lake_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
-            },
-            .Road => {
-                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
-                const TILE_SRC_SIZE: f32 = 50;
-                const road_idx: f32 = 3; // Index 3 is Road
+        // Use sprite source coordinates from the building data
+        const building_source = rl.Rectangle{
+            .x = building.sprite_x,
+            .y = building.sprite_y,
+            .width = building.sprite_width,
+            .height = building.sprite_height,
+        };
 
-                const building_source = rl.Rectangle{ .x = road_idx * TILE_SRC_SIZE, .y = 0, .width = TILE_SRC_SIZE, .height = TILE_SRC_SIZE };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
-                rl.drawTexturePro(terrain_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
-            },
-            .House => {
-                // Draw 3x3 block from Ruins texture
-                // Source tiles start at col 0, row 2 (based on analysis)
-                const TILE_SIZE: f32 = 4;
-                const START_COL: f32 = 0;
-                const START_ROW: f32 = 0;
+        // Destination size based on tile dimensions (matches collision)
+        const building_dest = rl.Rectangle{
+            .x = building_x,
+            .y = building_y,
+            .width = @as(f32, @floatFromInt(building.width_tiles)) * tile_w,
+            .height = @as(f32, @floatFromInt(building.height_tiles)) * tile_h,
+        };
 
-                // We need to draw 9 tiles (3x3 grid)
-                // But the building object defines the total size.
-                // Let's assume the building dimensions (width_tiles, height_tiles) match the 3x3 grid.
-                // We can draw the whole 3x3 block as one large rectangle if they are contiguous in the sprite sheet.
-                // Analysis showed cols 0,1,2 and rows 2,3,4 have content.
-                // So we can draw a 96x96 block from (0, 64).
+        // Select texture based on building type
+        const texture = switch (building.building_type) {
+            .Townhall, .House => townhall_texture,
+            .Lake => lake_texture,
+            else => continue, // Skip Road and other types (handled by auto-tile)
+        };
 
-                const src_x = START_COL * TILE_SIZE;
-                const src_y = START_ROW * TILE_SIZE;
-                const src_w = TILE_SIZE;
-                const src_h = TILE_SIZE;
-
-                const building_pos = rl.Vector2{ .x = building_x, .y = building_y };
-                const building_source = rl.Rectangle{ .x = src_x, .y = src_y, .width = src_w, .height = src_h };
-                const building_dest = rl.Rectangle{ .x = building_pos.x, .y = building_pos.y, .width = building.sprite_width, .height = building.sprite_height };
-
-                rl.drawTexturePro(ruins_texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
-            },
-            else => {},
-        }
+        rl.drawTexturePro(texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
     }
 }
 
@@ -238,7 +217,11 @@ pub fn runRaylib() anyerror!void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var world = try shared.World.loadFromFile(allocator, "assets/world.json");
+    // Load world from world_output.json (saved by tile_inspector) or fall back to world.json
+    var world = shared.World.loadFromFile(allocator, "assets/world_output.json") catch |err| blk: {
+        std.debug.print("Could not load world_output.json: {}, falling back to world.json\n", .{err});
+        break :blk try shared.World.loadFromFile(allocator, "assets/world.json");
+    };
     defer world.deinit(allocator);
 
     // Initialization
@@ -285,7 +268,7 @@ pub fn runRaylib() anyerror!void {
         rl.unloadTexture(assets.walk_right);
         rl.unloadTexture(assets.shadow);
     }
-    // Load tileset for auto-tile system (like tile_inspector.zig)
+    // Load tileset for terrain (same as tile_inspector.zig)
     var tileset_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Tileset/Tileset Spring.png");
     // Apply color keying for transparency (Black -> Transparent)
     rl.imageColorReplace(&tileset_img, rl.Color.black, rl.Color.blank);
@@ -293,10 +276,11 @@ pub fn runRaylib() anyerror!void {
     const tileset_texture = try rl.loadTextureFromImage(tileset_img);
     defer rl.unloadTexture(tileset_texture);
 
-    const terrain_img = try rl.loadImage("assets/terrain_sprites.png");
-    defer rl.unloadImage(terrain_img);
-    const terrain_texture = try rl.loadTextureFromImage(terrain_img);
-    defer rl.unloadTexture(terrain_texture);
+    const grass = Frames{
+        .SpringTiles = .{
+            .Grass = LandscapeTile.init(tileset_texture, 8.0, 0.0),
+        },
+    };
 
     const townhall_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
     defer rl.unloadImage(townhall_img);
@@ -307,12 +291,8 @@ pub fn runRaylib() anyerror!void {
     const lake_img = try rl.loadImage("assets/lake_small.png");
     defer rl.unloadImage(lake_img);
     const lake_texture = try rl.loadTextureFromImage(lake_img);
+    rl.setTextureFilter(lake_texture, .point);
     defer rl.unloadTexture(lake_texture);
-
-    const ruins_img = try rl.loadImage("assets/Buildings/Topdown RPG 32x32 - Ruins.PNG");
-    defer rl.unloadImage(ruins_img);
-    const ruins_texture = try rl.loadTextureFromImage(ruins_img);
-    defer rl.unloadTexture(ruins_texture);
 
     var player = Character.init(rl.Vector2{ .x = 350, .y = 200 }, rl.Vector2{ .x = 32, .y = 32 });
     const speed = 200;
@@ -332,10 +312,6 @@ pub fn runRaylib() anyerror!void {
     };
     const minimap = try rl.loadRenderTexture(MINIMAP_SIZE, MINIMAP_SIZE);
     defer rl.unloadRenderTexture(minimap);
-
-    // Initialize auto-tile map from loaded world (like tile_inspector.zig)
-    var auto_tile_map = try MultiLayerTileMap.initFromWorld(allocator, tileset_texture, world);
-    defer auto_tile_map.deinit();
 
     // Initialize Game State
     var game_state = ClientGameState.init(allocator);
@@ -371,22 +347,12 @@ pub fn runRaylib() anyerror!void {
         }
 
         if (move_cmd) |cmd| {
-            // Push input to game state (thread-safe)
-            _ = game_state.pushInput(cmd);
-            // However, the 'reconcileState' logic is now in the network thread.
-            // To get instant feedback, we should probably maintain a 'visual_pos' that we update immediately here.
-            // But for simplicity of this refactor, let's stick to the architecture:
-            // Input -> Queue -> Network Thread -> Update Snapshot (Reconciled) -> Render Thread reads Snapshot.
-            // This adds 1 RTT + Processing delay to visual movement if we only read confirmed snapshots.
-            // BUT, our 'reconcileState' logic in UdpClient (now Network Thread) applies pending moves to the latest server state.
-            // So as soon as we push input, if we also had a way to apply it to the latest snapshot locally...
-            // Actually, the previous code called 'sendMove' which updated 'pending_moves'.
-            // Then 'pollState' would reconcile.
-            // Here, we push to 'pending_moves'. The network thread reads it and sends it.
-            // The network thread ALSO receives packets and reconciles.
-            // If we want smooth movement, we need to predict locally.
-            // Let's just push input for now and see.
+            // Apply immediate local movement for responsive controls
+            applyMoveToVector(&player.pos, cmd, world);
 
+            // Push input to game state (thread-safe) so the network
+            // thread can send and reconcile with the server.
+            _ = game_state.pushInput(cmd);
         }
 
         // ... (Rendering) ...
@@ -400,15 +366,18 @@ pub fn runRaylib() anyerror!void {
         camera.target = player.pos;
         updateCameraFocus(&camera, player, screen_width, screen_height, world);
 
-        rl.beginMode2D(camera);
+        // Use a render camera snapped to pixel grid to prevent tile seams
+        var render_camera = camera;
+        render_camera.target.x = @floor(camera.target.x * camera.zoom) / camera.zoom;
+        render_camera.target.y = @floor(camera.target.y * camera.zoom) / camera.zoom;
 
-        // Draw World using auto-tile system (like tile_inspector.zig)
-        const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
-        const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
-        auto_tile_map.draw(tile_w, tile_h);
+        rl.beginMode2D(render_camera);
+
+        // Draw grass background using the shared helper (same as tile_inspector.zig)
+        shared.drawGrassBackground(grass, world);
 
         // Draw all buildings from map configuration
-        drawConstruction(townhall_texture, lake_texture, terrain_texture, ruins_texture, world);
+        drawConstruction(townhall_texture, lake_texture, world);
 
         // Draw other players with animation
         // Uses double-buffered state - lock-free read from the active buffer

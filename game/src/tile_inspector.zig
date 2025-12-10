@@ -16,7 +16,7 @@ const MultiLayerTileMap = tiles.MultiLayerTileMap;
 const sheets = shared.sheets;
 pub const LandscapeTile = shared.LandscapeTile;
 pub const Frames = shared.Frames;
-pub const drawLandscapeTile = shared.drawLandscapeTile;
+const drawGrassBackground = shared.drawGrassBackground;
 
 // Import the placement system
 const placement = shared.placement;
@@ -38,50 +38,6 @@ var g_placed_items: ?*std.ArrayList(placement.PlacedItem) = null;
 
 // Sidebar layout constants
 const SIDEBAR_WIDTH: f32 = 250.0;
-
-fn drawGrassBackground(grass: Frames, world: shared.World) void {
-    const tile_w: f32 = 16.0;
-    const tile_h: f32 = 16.0;
-
-    var ty: i32 = 0;
-    while (ty < world.tiles_y) : (ty += 1) {
-        var tx: i32 = 0;
-        while (tx < world.tiles_x) : (tx += 1) {
-            const x = @as(f32, @floatFromInt(tx)) * tile_w;
-            const y = @as(f32, @floatFromInt(ty)) * tile_h;
-
-            // Determine the correct tile direction based on position
-            const dir: LandscapeTile.Dir = blk: {
-                const is_left = tx == 0;
-                const is_right = tx == world.tiles_x - 1;
-                const is_top = ty == 0;
-                const is_bottom = ty == world.tiles_y - 1;
-
-                if (is_left and is_top) {
-                    break :blk .TopLeftCorner;
-                } else if (is_right and is_top) {
-                    break :blk .TopRightCorner;
-                } else if (is_left and is_bottom) {
-                    break :blk .BottomLeftCorner;
-                } else if (is_right and is_bottom) {
-                    break :blk .BottomRightCorner;
-                } else if (is_left) {
-                    break :blk .Left;
-                } else if (is_right) {
-                    break :blk .Right;
-                } else if (is_top) {
-                    break :blk .Top;
-                } else if (is_bottom) {
-                    break :blk .Bottom;
-                } else {
-                    break :blk .Center;
-                }
-            };
-
-            drawLandscapeTile(grass, dir, x, y);
-        }
-    }
-}
 
 pub fn main() !void {
     // Initialization
@@ -141,13 +97,17 @@ pub fn main() !void {
     };
     defer world.deinit(allocator);
 
+    // Calculate tile size from world dimensions
+    const tile_width: u32 = @intCast(@divFloor(@as(i32, @intFromFloat(world.width)), world.tiles_x));
+    const tile_height: u32 = @intCast(@divFloor(@as(i32, @intFromFloat(world.height)), world.tiles_y));
+
     // Initialize the new dynamic Map for editing
     var editor_map_instance = try Map.initWithTileSize(
         allocator,
         @intCast(world.tiles_x),
         @intCast(world.tiles_y),
-        16,
-        16,
+        tile_width,
+        tile_height,
     );
     defer editor_map_instance.deinit();
 
@@ -163,8 +123,8 @@ pub fn main() !void {
         .zoom = 1.0,
     };
 
-    // Initialize the modular placement system
-    var placement_system = PlacementSystem.init(.{});
+    // Initialize the modular placement system with world's tile size
+    var placement_system = PlacementSystem.init(.{ .grid_size = @intCast(tile_width) });
     placement_system.setBounds(world.tiles_x, world.tiles_y);
 
     var active_menu_idx: ?usize = null;
@@ -418,6 +378,8 @@ fn saveWorld() void {
         tile_y: i32,
         width_tiles: i32,
         height_tiles: i32,
+        sprite_x: i32,
+        sprite_y: i32,
         sprite_width: i32,
         sprite_height: i32,
     };
@@ -440,6 +402,8 @@ fn saveWorld() void {
             .tile_y = tile_y,
             .width_tiles = width_tiles,
             .height_tiles = height_tiles,
+            .sprite_x = @as(i32, @intFromFloat(item.data.sprite.x)),
+            .sprite_y = @as(i32, @intFromFloat(item.data.sprite.y)),
             .sprite_width = @as(i32, @intFromFloat(item.data.sprite.width)),
             .sprite_height = @as(i32, @intFromFloat(item.data.sprite.height)),
         });
