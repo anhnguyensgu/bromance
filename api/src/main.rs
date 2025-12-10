@@ -6,9 +6,16 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use sqlx::sqlite::SqlitePoolOptions;
+use jsonwebtoken::EncodingKey;
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: SqlitePool,
+    pub encoding_key: EncodingKey,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,12 +35,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to connect to DB");
 
+    // Load private key
+    let encoding_key = EncodingKey::from_ed_pem(include_bytes!("../keys/private.pem"))
+        .expect("Failed to load private key");
+
+    let app_state = AppState {
+        db: pool,
+        encoding_key,
+    };
+
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .route("/auth/register", post(handlers::auth::register))
         .route("/auth/login", post(handlers::auth::login))
         .layer(TraceLayer::new_for_http())
-        .with_state(pool);
+        .with_state(app_state);
 
     let verbose_addr = "0.0.0.0:3000";
     let listener = tokio::net::TcpListener::bind(verbose_addr).await?;

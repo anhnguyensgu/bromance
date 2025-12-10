@@ -3,13 +3,13 @@ use argon2::{
     Argon2,
 };
 use axum::{extract::State, Json};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{encode, Header};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 
 use crate::{
     error::AppError,
     models::user::{AuthResponse, CreateUser, LoginPayload, User},
+    AppState,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,7 +19,7 @@ struct Claims {
 }
 
 pub async fn register(
-    State(pool): State<SqlitePool>,
+    State(pool): State<AppState>,
     Json(payload): Json<CreateUser>,
 ) -> Result<Json<User>, AppError> {
     let salt = SaltString::generate(&mut OsRng);
@@ -34,14 +34,14 @@ pub async fn register(
         payload.email,
         password_hash
     )
-    .fetch_one(&pool)
+    .fetch_one(&pool.db)
     .await?;
 
     Ok(Json(user))
 }
 
 pub async fn login(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let user = sqlx::query_as!(
@@ -49,7 +49,7 @@ pub async fn login(
         "SELECT id as \"id!\", email as \"email!\", password_hash as \"password_hash!\", created_at as \"created_at!\" FROM users WHERE email = ?",
         payload.email
     )
-    .fetch_optional(&pool)
+    .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::LoginFail)?;
 
@@ -69,11 +69,8 @@ pub async fn login(
         exp: expiration as usize,
     };
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret("secret".as_ref()),
-    )?;
+    let header = Header::new(jsonwebtoken::Algorithm::EdDSA);
+    let token = encode(&header, &claims, &state.encoding_key)?;
 
     Ok(Json(AuthResponse { token }))
 }

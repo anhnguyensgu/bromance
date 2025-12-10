@@ -12,6 +12,8 @@ zig-out/
 **/.zig-global-cache/
 **/zig-out/
 **/target/
+**/keys/
+**/data.db-wal
 
 # Compiled objects and libraries
 *.o
