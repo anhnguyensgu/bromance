@@ -11,6 +11,7 @@ zig-out/
 **/zig-cache-global/
 **/.zig-global-cache/
 **/zig-out/
+**/target/
 
 # Compiled objects and libraries
 *.o
