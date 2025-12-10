@@ -16,6 +16,8 @@ pub const TerrainType = t.TerrainType;
 
 pub const menu = @import("ui/menu.zig");
 pub const editor_map = @import("map/editor_map.zig");
+pub const ghost_layer = @import("ui/ghost_layer.zig");
+pub const placement = @import("ui/placement.zig");
 
 pub const PlayerState = struct {
     x: f32,

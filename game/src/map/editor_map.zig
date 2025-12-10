@@ -67,12 +67,26 @@ pub const TileLayer = struct {
         }
     }
 
-    /// Resize the layer (data will be cleared)
-    pub fn resize(self: *Self, new_width: u32, new_height: u32) !void {
+    /// Resize the layer (preserves existing data)
+    pub fn resize(self: *Self, old_width: u32, old_height: u32, new_width: u32, new_height: u32) !void {
         const new_size = @as(usize, new_width) * @as(usize, new_height);
+        const new_tiles = try self.allocator.alloc(TileId, new_size);
+        @memset(new_tiles, EMPTY_TILE);
+
+        const copy_w = @min(old_width, new_width);
+        const copy_h = @min(old_height, new_height);
+
+        var y: u32 = 0;
+        while (y < copy_h) : (y += 1) {
+            const old_start = @as(usize, y) * old_width;
+            const old_end = old_start + copy_w;
+            const new_start = @as(usize, y) * new_width;
+
+            @memcpy(new_tiles[new_start..][0..copy_w], self.tiles[old_start..old_end]);
+        }
+
         self.allocator.free(self.tiles);
-        self.tiles = try self.allocator.alloc(TileId, new_size);
-        @memset(self.tiles, EMPTY_TILE);
+        self.tiles = new_tiles;
     }
 };
 
@@ -196,12 +210,17 @@ pub const Map = struct {
         self.layers[layer_index].setTile(x, y, self.width, tile_id);
     }
 
-    /// Resize the map (all layers will be cleared)
+    /// Resize the map (preserves existing data)
     pub fn resize(self: *Self, new_width: u32, new_height: u32) !void {
+        const old_width = self.width;
+        const old_height = self.height;
+
+        // Update dimensions
         self.width = new_width;
         self.height = new_height;
+
         for (self.layers[0..self.layer_count]) |*layer| {
-            try layer.resize(new_width, new_height);
+            try layer.resize(old_width, old_height, new_width, new_height);
         }
     }
 
@@ -257,6 +276,37 @@ pub const Map = struct {
         tiles: []const TileId,
     };
 
+    // ============================================================
+    // Game Format Export (matches shared.World)
+    // ============================================================
+
+    pub const GameWorldJson = struct {
+        world: struct {
+            width: f32,
+            height: f32,
+            tiles_x: u32,
+            tiles_y: u32,
+        },
+        buildings: []const anyopaque, // We pass buildings array directly as JSON value or raw
+        // tiles: ... (optional flattened grid)
+    };
+
+    /// Export map in the format expected by the game engine (shared.World)
+    /// This consolidates logic from tile_inspector.zig
+    pub fn exportAsGameMap(self: *const Self, writer: anytype, buildings: anytype) !void {
+        const output = .{
+            .world = .{
+                .width = @as(f32, @floatFromInt(self.width * self.tile_width)),
+                .height = @as(f32, @floatFromInt(self.height * self.tile_height)),
+                .tiles_x = self.width,
+                .tiles_y = self.height,
+            },
+            .buildings = buildings,
+        };
+        try writer.print("{f}", .{std.json.fmt(output, .{ .whitespace = .indent_2 })});
+        try writer.writeAll("\n");
+    }
+
     /// Save map to JSON file
     pub fn saveToFile(self: *const Self, filename: []const u8) !void {
         // Create file
@@ -276,37 +326,32 @@ pub const Map = struct {
 
     /// Write map as JSON to any writer
     pub fn writeJson(self: *const Self, writer: anytype) !void {
-        // Write JSON manually for compatibility
-        try writer.writeAll("{\n");
-        try writer.print("  \"name\": \"{s}\",\n", .{self.name});
-        try writer.print("  \"width\": {},\n", .{self.width});
-        try writer.print("  \"height\": {},\n", .{self.height});
-        try writer.print("  \"tile_width\": {},\n", .{self.tile_width});
-        try writer.print("  \"tile_height\": {},\n", .{self.tile_height});
-        try writer.writeAll("  \"layers\": [\n");
+        // Create temporary list of layers for serialization
+        const json_layers = try self.allocator.alloc(JsonLayer, self.layer_count);
+        defer self.allocator.free(json_layers);
 
-        for (self.layers[0..self.layer_count], 0..) |layer, layer_idx| {
-            try writer.writeAll("    {\n");
-            try writer.print("      \"name\": \"{s}\",\n", .{layer.name});
-            try writer.print("      \"layer_type\": \"{s}\",\n", .{@tagName(layer.layer_type)});
-            try writer.print("      \"visible\": {},\n", .{layer.visible});
-            try writer.writeAll("      \"tiles\": [");
-
-            for (layer.tiles, 0..) |tile, i| {
-                if (i > 0) try writer.writeAll(", ");
-                try writer.print("{}", .{tile});
-            }
-
-            try writer.writeAll("]\n");
-            try writer.writeAll("    }");
-            if (layer_idx < self.layer_count - 1) {
-                try writer.writeAll(",");
-            }
-            try writer.writeAll("\n");
+        for (self.layers[0..self.layer_count], 0..) |layer, i| {
+            json_layers[i] = JsonLayer{
+                .name = layer.name,
+                .layer_type = @tagName(layer.layer_type),
+                .visible = layer.visible,
+                .tiles = layer.tiles,
+            };
         }
 
-        try writer.writeAll("  ]\n");
-        try writer.writeAll("}\n");
+        const json_map = JsonMap{
+            .name = self.name,
+            .width = self.width,
+            .height = self.height,
+            .tile_width = self.tile_width,
+            .tile_height = self.tile_height,
+            .layers = json_layers,
+        };
+
+        // try std.json.stringify(json_map, .{ .whitespace = .indent_2 }, writer);
+        // std.debug.print("aaaaaaaaaaaaaaa", .{});
+        try writer.print("{f}", .{std.json.fmt(json_map, .{ .whitespace = .indent_2 })});
+        try writer.writeAll("\n");
     }
 
     /// Load map from JSON file
@@ -587,8 +632,9 @@ test "Map: resize" {
 
     try std.testing.expectEqual(@as(u32, 20), map.width);
     try std.testing.expectEqual(@as(u32, 20), map.height);
-    // Data should be cleared after resize
-    try std.testing.expectEqual(@as(?TileId, 0), map.getTile(5, 5));
+
+    // Data should be PRESERVED after resize
+    try std.testing.expectEqual(@as(?TileId, 42), map.getTile(5, 5));
 }
 
 test "Map: multiple layers" {
