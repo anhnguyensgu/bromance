@@ -250,6 +250,8 @@ pub const ClientGameState = struct {
         // Re-apply remaining moves
         var pos = server_pos;
         const PLAYER_SIZE: f32 = 32.0;
+        const max_x = @max(0.0, world.width - PLAYER_SIZE);
+        const max_y = @max(0.0, world.height - PLAYER_SIZE);
 
         for (0..self.pending_count) |i| {
             const cmd = self.pending_moves[i].cmd;
@@ -263,9 +265,9 @@ pub const ClientGameState = struct {
                 .Right => new_pos.x += move_amount,
             }
 
-            // Clamp
-            new_pos.x = std.math.clamp(new_pos.x, 0, world.width);
-            new_pos.y = std.math.clamp(new_pos.y, 0, world.height);
+            // Clamp so the whole player stays inside the world
+            new_pos.x = std.math.clamp(new_pos.x, 0.0, max_x);
+            new_pos.y = std.math.clamp(new_pos.y, 0.0, max_y);
 
             // Collision
             const collision = world.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, cmd.direction);
