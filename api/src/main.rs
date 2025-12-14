@@ -1,14 +1,8 @@
-mod error;
-mod handlers;
 mod models;
+mod rpc;
 
-use axum::{
-    routing::{get, post},
-    Router,
-};
 use jsonwebtoken::EncodingKey;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
-use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
@@ -23,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "server=debug,tower_http=debug".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "server=debug".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -44,18 +38,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         encoding_key,
     };
 
-    let app = Router::new()
-        .route("/", get(|| async { "Hello, World!" }))
-        .route("/auth/register", post(handlers::auth::register))
-        .route("/auth/login", post(handlers::auth::login))
-        .layer(TraceLayer::new_for_http())
-        .with_state(app_state);
+    let addr = "[::0]:50051".parse().unwrap();
+    tracing::info!("gRPC listening on {}", addr);
+    let auth_service = rpc::auth::AuthServiceImpl { state: app_state };
 
-    let verbose_addr = "0.0.0.0:3000";
-    let listener = tokio::net::TcpListener::bind(verbose_addr).await?;
-    tracing::debug!("listening on {}", verbose_addr);
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+    tonic::transport::Server::builder()
+        .add_service(
+            rpc::auth::auth_proto::auth_service_server::AuthServiceServer::new(auth_service),
+        )
+        .serve_with_shutdown(addr, shutdown_signal())
         .await?;
 
     Ok(())

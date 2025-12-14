@@ -9,19 +9,8 @@ pub struct User {
     pub created_at: chrono::NaiveDateTime,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateUser {
-    pub email: String,
-    pub password: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LoginPayload {
-    pub email: String,
-    pub password: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AuthResponse {
-    pub token: String,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: String, // email
+    pub exp: usize,
 }
