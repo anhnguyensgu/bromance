@@ -1,7 +1,7 @@
 const rl = @import("raylib");
-const MoveDirection = @import("../movement/command.zig").MoveDirection;
+const Player = @import("../../game/entities/player.zig").Player;
 
-pub const CharacterAssets = struct {
+pub const PlayerAssets = struct {
     idle_up: rl.Texture2D,
     idle_down: rl.Texture2D,
     idle_left: rl.Texture2D,
@@ -13,46 +13,25 @@ pub const CharacterAssets = struct {
     shadow: rl.Texture2D,
 };
 
-pub const Character = struct {
-    pos: rl.Vector2,
-    size: rl.Vector2,
-    dir: MoveDirection,
-    is_moving: bool,
-    frame_index: usize,
-    anim_timer: f32,
-    debug: bool,
+pub const PlayerRenderer = struct {
+    frame_index: usize = 0,
+    anim_timer: f32 = 0,
+    last_moving: bool = false,
+    debug: bool = true,
 
     const WALK_SPEED: f32 = 0.1;
     const FRAME_WIDTH: f32 = 32;
     const FRAME_HEIGHT: f32 = 32;
-    const Self = @This();
 
-    pub fn init(pos: rl.Vector2, size: rl.Vector2) Self {
-        return .{
-            .pos = pos,
-            .size = size,
-            .is_moving = false,
-            .dir = .Down,
-            .frame_index = 0,
-            .anim_timer = 0,
-            .debug = true,
-        };
-    }
-
-    pub fn update(self: *Self, dt: f32, dir: MoveDirection, is_moving: bool) void {
-        const was_moving = self.is_moving;
-        self.is_moving = is_moving;
-
-        if (self.is_moving) {
-            self.dir = dir;
+    pub fn update(self: *PlayerRenderer, dt: f32, player: *const Player) void {
+        if (player.is_moving) {
             self.anim_timer += dt;
             if (self.anim_timer >= WALK_SPEED) {
                 self.anim_timer = 0;
                 self.frame_index = (self.frame_index + 1) % 4; // Walk has 4 frames
             }
         } else {
-            // Idle animation
-            if (was_moving) {
+            if (self.last_moving) {
                 self.frame_index = 0;
                 self.anim_timer = 0;
             }
@@ -62,25 +41,27 @@ pub const Character = struct {
                 self.frame_index = (self.frame_index + 1) % 9; // Idle has 9 frames
             }
         }
+
+        self.last_moving = player.is_moving;
     }
 
-    pub fn draw(self: *Self, assets: CharacterAssets) !void {
+    pub fn draw(self: *PlayerRenderer, player: *const Player, assets: PlayerAssets) void {
         // Draw shadow
         const shadow_dest = rl.Rectangle{
-            .x = self.pos.x,
-            .y = self.pos.y + 2, // Slight offset
+            .x = player.pos.x,
+            .y = player.pos.y + 2, // Slight offset
             .width = 32,
             .height = 32,
         };
         rl.drawTexturePro(assets.shadow, rl.Rectangle{ .x = 0, .y = 0, .width = 32, .height = 32 }, shadow_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
 
         // Select texture
-        const texture = if (self.is_moving) switch (self.dir) {
+        const texture = if (player.is_moving) switch (player.dir) {
             .Up => assets.walk_up,
             .Down => assets.walk_down,
             .Left => assets.walk_left,
             .Right => assets.walk_right,
-        } else switch (self.dir) {
+        } else switch (player.dir) {
             .Up => assets.idle_up,
             .Down => assets.idle_down,
             .Left => assets.idle_left,
@@ -94,14 +75,14 @@ pub const Character = struct {
             .height = FRAME_HEIGHT,
         };
         const dest = rl.Rectangle{
-            .x = self.pos.x,
-            .y = self.pos.y,
-            .width = self.size.x,
-            .height = self.size.y,
+            .x = player.pos.x,
+            .y = player.pos.y,
+            .width = player.size.x,
+            .height = player.size.y,
         };
         rl.drawTexturePro(texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
         if (self.debug) {
-            rl.drawRectangleLines(@intFromFloat(self.pos.x), @intFromFloat(self.pos.y), @intFromFloat(self.size.x), @intFromFloat(self.size.y), .red);
+            rl.drawRectangleLines(@intFromFloat(player.pos.x), @intFromFloat(player.pos.y), @intFromFloat(player.size.x), @intFromFloat(player.size.y), .red);
         }
     }
 };

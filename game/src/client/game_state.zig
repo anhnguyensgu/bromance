@@ -1,5 +1,5 @@
 const std = @import("std");
-const rl = @import("raylib");
+const Vec2 = @import("../game/math/vec2.zig").Vec2;
 const shared = @import("../shared.zig");
 const network = shared.network;
 const MovementCommand = @import("../movement/command.zig").MovementCommand;
@@ -10,7 +10,7 @@ pub const MAX_SNAPSHOTS: usize = 32;
 
 pub const Snapshot = struct {
     timestamp: i64,
-    pos: rl.Vector2,
+    pos: Vec2,
 };
 
 pub const PendingMove = struct {
@@ -19,7 +19,7 @@ pub const PendingMove = struct {
 };
 
 pub const OtherPlayerState = struct {
-    pos: rl.Vector2,
+    pos: Vec2,
     last_update_ns: i64,
     dir: MoveDirection = .Down,
     is_moving: bool = false,
@@ -98,7 +98,7 @@ pub const ClientGameState = struct {
         return self.pending_moves[self.pending_count - 1];
     }
 
-    pub fn storeSnapshot(self: *ClientGameState, pos: rl.Vector2) void {
+    pub fn storeSnapshot(self: *ClientGameState, pos: Vec2) void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -146,7 +146,7 @@ pub const ClientGameState = struct {
         for (players) |player_info| {
             if (player_info.session_id == own_session_id) {
                 // This is our own position from the server - use for reconciliation
-                const server_pos = rl.Vector2{ .x = player_info.x, .y = player_info.y };
+                const server_pos = Vec2{ .x = player_info.x, .y = player_info.y };
                 const corrected = self.reconcileState(ack, server_pos, world);
                 self.storeSnapshot(corrected);
                 continue;
@@ -190,7 +190,7 @@ pub const ClientGameState = struct {
     }
 
     // Interpolation logic
-    pub fn sampleInterpolated(self: *ClientGameState) ?rl.Vector2 {
+    pub fn sampleInterpolated(self: *ClientGameState) ?Vec2 {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -216,7 +216,7 @@ pub const ClientGameState = struct {
                 const elapsed = render_time - s1.timestamp;
                 const t = @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(total));
 
-                return rl.Vector2{
+                return Vec2{
                     .x = s1.pos.x + (s2.pos.x - s1.pos.x) * t,
                     .y = s1.pos.y + (s2.pos.y - s1.pos.y) * t,
                 };
@@ -233,7 +233,7 @@ pub const ClientGameState = struct {
     }
 
     // Reconcile logic needs access to pending moves
-    pub fn reconcileState(self: *ClientGameState, ack: u32, server_pos: rl.Vector2, world: shared.World) rl.Vector2 {
+    pub fn reconcileState(self: *ClientGameState, ack: u32, server_pos: Vec2, world: shared.World) Vec2 {
         self.mutex.lock();
         defer self.mutex.unlock();
 

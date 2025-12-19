@@ -1,9 +1,8 @@
 const std = @import("std");
-const rl = @import("raylib");
-
 const MovementCommand = @import("../movement/command.zig").MovementCommand;
 const MoveDirection = @import("../movement/command.zig").MoveDirection;
 const PingPayload = @import("../ping/command.zig").PingPayload;
+const Vec2 = @import("../game/math/vec2.zig").Vec2;
 const shared = @import("../shared.zig");
 const network = shared.network;
 const ClientGameState = @import("game_state.zig").ClientGameState;
@@ -109,7 +108,7 @@ pub const UdpClient = struct {
     fn handlePacket(self: *UdpClient, packet: network.Packet) !void {
         switch (packet.payload) {
             .state_update => |state| {
-                const server_pos = rl.Vector2{ .x = state.x, .y = state.y };
+                const server_pos = Vec2{ .x = state.x, .y = state.y };
                 const corrected = self.state.reconcileState(packet.header.ack, server_pos, self.world);
                 self.state.storeSnapshot(corrected);
             },
@@ -157,7 +156,7 @@ pub const UdpClient = struct {
     }
 };
 
-pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand, world: shared.World) void {
+pub fn applyMoveToVector(pos: *Vec2, move: MovementCommand, world: shared.World) void {
     const move_amount = move.speed * move.delta;
 
     var new_pos = pos.*;

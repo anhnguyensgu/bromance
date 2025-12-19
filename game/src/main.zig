@@ -2,9 +2,12 @@ const std = @import("std");
 
 const rl = @import("raylib");
 
-const player_mod = @import("character/player.zig");
-const Character = player_mod.Character;
-const CharacterAssets = player_mod.CharacterAssets;
+const player_mod = @import("game/entities/player.zig");
+const Player = player_mod.Player;
+const Vec2 = @import("game/math/vec2.zig").Vec2;
+const player_renderer_mod = @import("render/characters/player_renderer.zig");
+const PlayerAssets = player_renderer_mod.PlayerAssets;
+const PlayerRenderer = player_renderer_mod.PlayerRenderer;
 const ClientGameState = @import("client/game_state.zig").ClientGameState;
 const client = @import("client/udp_client.zig");
 const UdpClient = @import("client/udp_client.zig").UdpClient;
@@ -19,7 +22,7 @@ const ui_menu = @import("ui/menu.zig");
 const MenuItem = ui_menu.MenuItem;
 const Menu = ui_menu.Menu;
 
-fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
+fn updateCameraFocus(camera: *rl.Camera2D, player: Player, screen_width: i32, screen_height: i32, world: shared.World) void {
     const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;
     const view_half_h: f32 = (@as(f32, @floatFromInt(screen_height)) * 0.5) / camera.zoom;
 
@@ -76,7 +79,7 @@ fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, 
             else => continue, // Skip Road and other types (handled by auto-tile)
         };
 
-        rl.drawTexturePro(texture, building_source, building_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+        rl.drawTexturePro(texture, building_source, building_dest, .{ .x = 0, .y = 0 }, 0, .white);
     }
 }
 
@@ -245,8 +248,8 @@ pub fn runRaylib() anyerror!void {
     const menu_height: i32 = 48;
 
     // Main game loop
-    // Load Character Assets
-    const assets = CharacterAssets{
+    // Load Player Assets
+    const assets = PlayerAssets{
         .idle_up = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Back.PNG"),
         .idle_down = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Front.PNG"),
         .idle_left = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Left.PNG"),
@@ -294,7 +297,8 @@ pub fn runRaylib() anyerror!void {
     rl.setTextureFilter(lake_texture, .point);
     defer rl.unloadTexture(lake_texture);
 
-    var player = Character.init(rl.Vector2{ .x = 350, .y = 200 }, rl.Vector2{ .x = 32, .y = 32 });
+    var player = Player.init(Vec2{ .x = 350, .y = 200 }, Vec2{ .x = 32, .y = 32 });
+    var player_renderer = PlayerRenderer{};
     const speed = 200;
     var camera = rl.Camera2D{
         .target = .init(player.pos.x + 20, player.pos.y + 20),
@@ -363,7 +367,7 @@ pub fn runRaylib() anyerror!void {
         rl.clearBackground(rl.Color.ray_white);
 
         // Camera follows player
-        camera.target = player.pos;
+        camera.target = .init(player.pos.x, player.pos.y);
         updateCameraFocus(&camera, player, screen_width, screen_height, world);
 
         // Use a render camera snapped to pixel grid to prevent tile seams
@@ -445,12 +449,13 @@ pub fn runRaylib() anyerror!void {
 
         // Update player animation state based on input (visual only)
         if (move_cmd) |cmd| {
-            player.update(delta, cmd.direction, true);
+            player.setMovement(cmd.direction, true);
         } else {
-            player.update(delta, .Down, false);
+            player.setMovement(player.dir, false);
         }
 
-        try player.draw(assets);
+        player_renderer.update(delta, &player);
+        player_renderer.draw(&player, assets);
         rl.endMode2D();
 
         top_menu.draw(200, main_menu_items[0..], &active_menu_item);
@@ -477,7 +482,7 @@ pub fn runRaylib() anyerror!void {
     udp_client.running.store(false, .release);
 }
 
-fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: shared.World, size: f32, MINIMAP_POS: rl.Vector2) void {
+fn updateMinimap(target: rl.RenderTexture2D, player_pos: Vec2, world: shared.World, size: f32, MINIMAP_POS: rl.Vector2) void {
     // 1. Update the minimap texture content (Inside a block!)
     {
         rl.beginTextureMode(target);
