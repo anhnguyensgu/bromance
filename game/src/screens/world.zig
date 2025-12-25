@@ -56,7 +56,6 @@ pub const WorldScreen = struct {
     pub const SceneAction = union(enum) {
         None,
         SwitchToLogin,
-        SwitchToGameOver,
     };
 
     pub fn init(ctx: anytype) !WorldScreen {

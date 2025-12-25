@@ -2,20 +2,17 @@ const std = @import("std");
 const context = @import("context.zig");
 const LoginScreen = @import("../screens/login.zig").LoginScreen;
 const WorldScreen = @import("../screens/world.zig").WorldScreen;
-const GameOverScreen = @import("../screens/game_over.zig").GameOverScreen;
 
 pub const SceneAction = union(enum) {
     None,
     SwitchToLogin,
     SwitchToWorld,
-    SwitchToGameOver,
     Quit,
 };
 
 pub const Scene = union(enum) {
     Login: *LoginScreen,
-    World: *WorldScreen,
-    GameOver: *GameOverScreen,
+    Gameplay: *WorldScreen,
 
     pub fn update(self: Scene, dt: f32, ctx: *context.GameContext) !SceneAction {
         switch (self) {
@@ -26,16 +23,8 @@ pub const Scene = union(enum) {
                     .SwitchToWorld => return .SwitchToWorld,
                 }
             },
-            .World => |s| {
+            .Gameplay => |s| {
                 const action = s.update(dt, ctx);
-                switch (action) {
-                    .None => return .None,
-                    .SwitchToLogin => return .SwitchToLogin,
-                    .SwitchToGameOver => return .SwitchToGameOver,
-                }
-            },
-            .GameOver => |s| {
-                const action = try s.update(dt, ctx);
                 switch (action) {
                     .None => return .None,
                     .SwitchToLogin => return .SwitchToLogin,
@@ -47,8 +36,7 @@ pub const Scene = union(enum) {
     pub fn draw(self: Scene, ctx: *context.GameContext) void {
         switch (self) {
             .Login => |s| s.draw(ctx),
-            .World => |s| s.draw(ctx),
-            .GameOver => |s| s.draw(ctx),
+            .Gameplay => |s| s.draw(ctx),
         }
     }
 
@@ -59,12 +47,8 @@ pub const Scene = union(enum) {
                 // It has http_client which is owned by context.
                 allocator.destroy(s);
             },
-            .World => |s| {
+            .Gameplay => |s| {
                 s.deinit();
-                allocator.destroy(s);
-            },
-            .GameOver => |s| {
-                s.deinit(allocator);
                 allocator.destroy(s);
             },
         }
@@ -93,7 +77,6 @@ pub const SceneManager = struct {
             .None => {},
             .SwitchToLogin => try self.changeScene(.Login, ctx),
             .SwitchToWorld => try self.changeScene(.World, ctx),
-            .SwitchToGameOver => try self.changeScene(.GameOver, ctx),
             .Quit => {
                 // Handle quit? Maybe return an error or status
             },
@@ -104,7 +87,7 @@ pub const SceneManager = struct {
         self.current_scene.draw(ctx);
     }
 
-    fn changeScene(self: *SceneManager, to: enum { Login, World, GameOver }, ctx: *context.GameContext) !void {
+    fn changeScene(self: *SceneManager, to: enum { Login, World }, ctx: *context.GameContext) !void {
         // Deinit current
         self.current_scene.deinit(self.allocator);
 
@@ -119,12 +102,7 @@ pub const SceneManager = struct {
                 const s = try self.allocator.create(WorldScreen);
                 s.* = try WorldScreen.init(ctx);
                 try s.start();
-                self.current_scene = .{ .World = s };
-            },
-            .GameOver => {
-                const s = try self.allocator.create(GameOverScreen);
-                s.* = GameOverScreen.init(self.allocator);
-                self.current_scene = .{ .GameOver = s };
+                self.current_scene = .{ .Gameplay = s };
             },
         }
     }
