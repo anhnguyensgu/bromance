@@ -214,6 +214,10 @@ pub const GrpcClient = struct {
                         // Store status info in thread-local or return special error
                         // For simplicity, just return error with status logged
                         if (status != .OK) {
+                            std.debug.print("gRPC error status: {}\n", .{status});
+                            if (status == .UNKNOWN) {
+                                std.debug.print("gRPC trailers (raw): {any}\n", .{payload});
+                            }
                             return error.GrpcError;
                         }
                     }

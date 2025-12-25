@@ -19,12 +19,28 @@ pub const LoginScreen = struct {
         Login,
     };
 
-    pub fn draw(self: *LoginScreen, screen_width: i32, screen_height: i32) Result {
+    pub const SceneAction = union(enum) {
+        None,
+        SwitchToWorld,
+    };
+
+    pub fn update(self: *LoginScreen, _: f32, _: anytype) SceneAction {
+        const result = self.handleInput();
+        if (result == .Login) {
+            self.login();
+            // Assuming successful login for now leads to World
+            // In real app, we'd wait for login success callback
+            return .SwitchToWorld;
+        }
+        return .None;
+    }
+
+    pub fn draw(self: *LoginScreen, ctx: anytype) void {
+        const screen_width = ctx.screen_width;
+        const screen_height = ctx.screen_height;
+
         const x = (@as(f32, @floatFromInt(screen_width)) - self.width) / 2.0;
         const y = (@as(f32, @floatFromInt(screen_height)) - self.height) / 2.0;
-
-        // Handle Input
-        const result = self.handleInput();
 
         // Draw background
         rl.drawRectangleRec(rl.Rectangle{ .x = x, .y = y, .width = self.width, .height = self.height }, .ray_white);
@@ -67,7 +83,6 @@ pub const LoginScreen = struct {
         // Login Button
         const btn_rect = widgets.Button(*LoginScreen){ .onClick = LoginScreen.login, .onClickContext = self, .rect = rl.Rectangle{ .x = content_x, .y = current_y, .width = self.width - 40, .height = 40 }, .text = "LOGIN" };
         btn_rect.draw();
-        return result;
     }
 
     fn handleInput(self: *LoginScreen) Result {
