@@ -459,3 +459,7 @@ test "loadFromFile" {
     try std.testing.expectEqual(@as(i32, 50), world_data.tiles_y);
     try std.testing.expect(world_data.buildings.len > 0);
 }
+
+pub const LoginScreen = @import("screens/login.zig").LoginScreen;
+pub const WorldScreen = @import("screens/world.zig").WorldScreen;
+pub const HttpClient = @import("client/http_client.zig").HttpClient;

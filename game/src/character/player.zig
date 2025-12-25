@@ -11,6 +11,59 @@ pub const CharacterAssets = struct {
     walk_left: rl.Texture2D,
     walk_right: rl.Texture2D,
     shadow: rl.Texture2D,
+
+    pub fn loadMainCharacter() !CharacterAssets {
+        const idle_up = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Back.PNG");
+        errdefer rl.unloadTexture(idle_up);
+
+        const idle_down = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Front.PNG");
+        errdefer rl.unloadTexture(idle_down);
+
+        const idle_left = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Left.PNG");
+        errdefer rl.unloadTexture(idle_left);
+
+        const idle_right = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Right.PNG");
+        errdefer rl.unloadTexture(idle_right);
+
+        const walk_up = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Back.PNG");
+        errdefer rl.unloadTexture(walk_up);
+
+        const walk_down = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Front.PNG");
+        errdefer rl.unloadTexture(walk_down);
+
+        const walk_left = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Left.PNG");
+        errdefer rl.unloadTexture(walk_left);
+
+        const walk_right = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Right.PNG");
+        errdefer rl.unloadTexture(walk_right);
+
+        const shadow = try rl.loadTexture("assets/MainCharacter/MainC_Shadow.png");
+        errdefer rl.unloadTexture(shadow);
+
+        return .{
+            .idle_up = idle_up,
+            .idle_down = idle_down,
+            .idle_left = idle_left,
+            .idle_right = idle_right,
+            .walk_up = walk_up,
+            .walk_down = walk_down,
+            .walk_left = walk_left,
+            .walk_right = walk_right,
+            .shadow = shadow,
+        };
+    }
+
+    pub fn deinit(self: CharacterAssets) void {
+        rl.unloadTexture(self.idle_up);
+        rl.unloadTexture(self.idle_down);
+        rl.unloadTexture(self.idle_left);
+        rl.unloadTexture(self.idle_right);
+        rl.unloadTexture(self.walk_up);
+        rl.unloadTexture(self.walk_down);
+        rl.unloadTexture(self.walk_left);
+        rl.unloadTexture(self.walk_right);
+        rl.unloadTexture(self.shadow);
+    }
 };
 
 pub const Character = struct {
