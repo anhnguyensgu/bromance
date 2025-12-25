@@ -1,8 +1,10 @@
 mod models;
+mod rest;
 mod rpc;
 
 use jsonwebtoken::EncodingKey;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use tonic::codec::CompressionEncoding;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
@@ -38,16 +40,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         encoding_key,
     };
 
-    let addr = "[::0]:50051".parse().unwrap();
-    tracing::info!("gRPC listening on {}", addr);
-    let auth_service = rpc::auth::AuthServiceImpl { state: app_state };
+    // REST server on port 3000
+    let rest_app = rest::router(app_state.clone());
+    let rest_addr = "0.0.0.0:3000";
+    tracing::info!("REST API listening on {}", rest_addr);
+    let rest_listener = tokio::net::TcpListener::bind(rest_addr).await?;
 
-    tonic::transport::Server::builder()
-        .add_service(
-            rpc::auth::auth_proto::auth_service_server::AuthServiceServer::new(auth_service),
-        )
-        .serve_with_shutdown(addr, shutdown_signal())
-        .await?;
+    // gRPC server on port 50051
+    let grpc_addr = "[::0]:50051".parse().unwrap();
+    tracing::info!("gRPC listening on {}", grpc_addr);
+    let auth_service = rpc::auth::AuthServiceImpl { state: app_state };
+    let auth_server =
+        rpc::auth::auth_proto::auth_service_server::AuthServiceServer::new(auth_service)
+            .accept_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Gzip);
+    let grpc_server = tonic::transport::Server::builder()
+        .add_service(auth_server)
+        .serve_with_shutdown(grpc_addr, shutdown_signal());
+
+    // Run both servers concurrently
+    tokio::select! {
+        res = axum::serve(rest_listener, rest_app) => {
+            if let Err(e) = res {
+                tracing::error!("REST server error: {}", e);
+            }
+        }
+        res = grpc_server => {
+            if let Err(e) = res {
+                tracing::error!("gRPC server error: {}", e);
+            }
+        }
+    }
 
     Ok(())
 }
