@@ -53,7 +53,7 @@ pub fn main() !void {
     rl.setTargetFPS(60);
 
     // Load Assets
-    var tileset_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Tileset/Tileset Spring.png");
+    var tileset_img = try rl.loadImage("assets/farmrpg/tileset/tilesetspring.png");
     // Apply color keying for transparency (Black -> Transparent)
     rl.imageColorReplace(&tileset_img, rl.Color.black, rl.Color.blank);
     defer rl.unloadImage(tileset_img);
@@ -64,7 +64,7 @@ pub fn main() !void {
     // Use point filtering to prevent pixel bleeding between tiles
     rl.setTextureFilter(tileset_texture, .point);
 
-    const house_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
+    const house_img = try rl.loadImage("assets/farmrpg/objects/house.png");
     defer rl.unloadImage(house_img);
     const house_texture = try rl.loadTextureFromImage(house_img);
     defer rl.unloadTexture(house_texture);
@@ -73,7 +73,7 @@ pub fn main() !void {
     const house_sprites = shared.sheets.SpriteSet.HouseSheet(house_texture);
     defer house_sprites.House.deinit();
 
-    const lake_img = try rl.loadImage("assets/lake_small.png");
+    const lake_img = try rl.loadImage("assets/lakesmall.png");
     defer rl.unloadImage(lake_img);
     const lake_texture = try rl.loadTextureFromImage(lake_img);
     rl.setTextureFilter(lake_texture, .point);
@@ -91,9 +91,9 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var world = shared.World.loadFromFile(allocator, "assets/world_output.json") catch |err| blk: {
-        std.debug.print("Could not load world_output.json: {}, falling back to world_edit.json\n", .{err});
-        break :blk try shared.World.loadFromFile(allocator, "assets/world_edit.json");
+    var world = shared.World.loadFromFile(allocator, "assets/worldoutput.json") catch |err| blk: {
+        std.debug.print("Could not load worldoutput.json: {}, falling back to worldedit.json\n", .{err});
+        break :blk try shared.World.loadFromFile(allocator, "assets/worldedit.json");
     };
     defer world.deinit(allocator);
 
@@ -171,7 +171,7 @@ pub fn main() !void {
     }.add;
 
     //UI has spritesheet
-    const menu_texture = try rl.loadTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
+    const menu_texture = try rl.loadTexture("assets/farmrpg/menu/mainmenu.png");
     defer rl.unloadTexture(menu_texture);
     var menu = Menu.init(menu_texture, .{});
     defer menu.deinit();
@@ -364,7 +364,7 @@ fn saveWorld() void {
     };
 
     // Create file
-    const file = std.fs.cwd().createFile("assets/world_output.json", .{}) catch |err| {
+    const file = std.fs.cwd().createFile("assets/worldoutput.json", .{}) catch |err| {
         std.debug.print("Failed to create file: {}\n", .{err});
         return;
     };
@@ -425,7 +425,7 @@ fn saveWorld() void {
         return;
     };
 
-    std.debug.print("World saved to assets/world_output.json ({} items)\n", .{items.items.len});
+    std.debug.print("World saved to assets/worldoutput.json ({} items)\n", .{items.items.len});
 }
 
 fn drawButton(rect: rl.Rectangle, text: [:0]const u8, mouse: rl.Vector2, clicked: bool) bool {

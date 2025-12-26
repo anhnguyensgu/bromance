@@ -138,7 +138,7 @@ pub const TileLayer = struct {
         };
     }
 
-    /// Initialize a tile layer from a world_edit.json-style file.
+    /// Initialize a tile layer from a worldedit.json-style file.
     /// Behavior:
     /// - Defaults every cell to GRASS (1)
     /// - Applies values from "tiles" grid:

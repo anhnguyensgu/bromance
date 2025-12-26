@@ -71,7 +71,7 @@ pub const World = struct {
     height: f32,
     tiles_x: i32,
     tiles_y: i32,
-    /// Optional logical tiles grid (flattened row-major). Present for world_edit.json.
+    /// Optional logical tiles grid (flattened row-major). Present for worldedit.json.
     tiles: []const u8 = &[_]u8{},
     /// Dimensions of the optional tiles grid above.
     tile_grid_x: i32 = 0,

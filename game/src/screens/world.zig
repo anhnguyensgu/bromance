@@ -61,8 +61,8 @@ pub const WorldScreen = struct {
         const assets_cache = ctx.assets;
 
         // Load World
-        var world = shared.World.loadFromFile(allocator, "assets/world_output.json") catch |err| blk: {
-            std.debug.print("Could not load world_output.json: {}, falling back to world.json\n", .{err});
+        var world = shared.World.loadFromFile(allocator, "assets/worldoutput.json") catch |err| blk: {
+            std.debug.print("Could not load worldoutput.json: {}, falling back to world.json\n", .{err});
             break :blk try shared.World.loadFromFile(allocator, "assets/world.json");
         };
         errdefer world.deinit(allocator);
@@ -72,11 +72,11 @@ pub const WorldScreen = struct {
         const char_assets = try CharacterAssets.loadMainCharacter();
         errdefer char_assets.deinit();
 
-        const tileset_texture = try assets_cache.getTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Tileset/Tileset Spring.png");
-        const townhall_texture = try assets_cache.getTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
+        const tileset_texture = try assets_cache.getTexture("assets/farmrpg/tileset/tilesetspring.png");
+        const townhall_texture = try assets_cache.getTexture("assets/farmrpg/objects/house.png");
 
         // Lake texture specific filter
-        const lake_texture = try assets_cache.getTexture("assets/lake_small.png");
+        const lake_texture = try assets_cache.getTexture("assets/lakesmall.png");
         rl.setTextureFilter(lake_texture, .point);
 
         const grass = Frames{
@@ -85,7 +85,7 @@ pub const WorldScreen = struct {
             },
         };
 
-        const menu_texture = try assets_cache.getTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
+        const menu_texture = try assets_cache.getTexture("assets/farmrpg/menu/mainmenu.png");
         const top_menu = Menu.init(menu_texture, .{});
 
         // Player & Camera

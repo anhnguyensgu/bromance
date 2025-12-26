@@ -10,7 +10,7 @@
 There are three overlapping systems that are only partially connected:
 
 1) **Logical terrain grid**
-- Source: `world_edit.json` contains a `tiles` 2D array.
+- Source: `worldedit.json` contains a `tiles` 2D array.
 - Loaded into `shared.World.tiles` (flattened) with `tile_grid_x/y`.
 - Intended to be the ground truth for terrain, but runtime code does **not** use it yet.
 
@@ -54,4 +54,3 @@ There are three overlapping systems that are only partially connected:
 - `tiles_x/tiles_y` and `tile_grid_x/tile_grid_y` should match.
 - If `tiles` exists, it should be the source of truth for terrain (rendering + collision + autotiling).
 - If `tiles` is missing, fallback procedural terrain can be used.
-

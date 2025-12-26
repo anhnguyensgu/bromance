@@ -13,31 +13,31 @@ pub const CharacterAssets = struct {
     shadow: rl.Texture2D,
 
     pub fn loadMainCharacter() !CharacterAssets {
-        const idle_up = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Back.PNG");
+        const idle_up = try rl.loadTexture("assets/maincharacter/maincidleback.png");
         errdefer rl.unloadTexture(idle_up);
 
-        const idle_down = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Front.PNG");
+        const idle_down = try rl.loadTexture("assets/maincharacter/maincidlefront.png");
         errdefer rl.unloadTexture(idle_down);
 
-        const idle_left = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Left.PNG");
+        const idle_left = try rl.loadTexture("assets/maincharacter/maincidleleft.png");
         errdefer rl.unloadTexture(idle_left);
 
-        const idle_right = try rl.loadTexture("assets/MainCharacter/MainC_Idle_Right.PNG");
+        const idle_right = try rl.loadTexture("assets/maincharacter/maincidleright.png");
         errdefer rl.unloadTexture(idle_right);
 
-        const walk_up = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Back.PNG");
+        const walk_up = try rl.loadTexture("assets/maincharacter/maincwalkback.png");
         errdefer rl.unloadTexture(walk_up);
 
-        const walk_down = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Front.PNG");
+        const walk_down = try rl.loadTexture("assets/maincharacter/maincwalkfront.png");
         errdefer rl.unloadTexture(walk_down);
 
-        const walk_left = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Left.PNG");
+        const walk_left = try rl.loadTexture("assets/maincharacter/maincwalkleft.png");
         errdefer rl.unloadTexture(walk_left);
 
-        const walk_right = try rl.loadTexture("assets/MainCharacter/MainC_Walk_Right.PNG");
+        const walk_right = try rl.loadTexture("assets/maincharacter/maincwalkright.png");
         errdefer rl.unloadTexture(walk_right);
 
-        const shadow = try rl.loadTexture("assets/MainCharacter/MainC_Shadow.png");
+        const shadow = try rl.loadTexture("assets/maincharacter/maincshadow.png");
         errdefer rl.unloadTexture(shadow);
 
         return .{
