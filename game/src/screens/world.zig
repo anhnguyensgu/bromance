@@ -21,6 +21,7 @@ const Menu = ui_menu.Menu;
 
 const Frames = shared.Frames;
 const LandscapeTile = shared.LandscapeTile;
+const SceneAction = @import("../core/scene_action.zig").SceneAction;
 
 pub const WorldScreen = struct {
     allocator: std.mem.Allocator,
@@ -53,7 +54,12 @@ pub const WorldScreen = struct {
     const MENU_HEIGHT: i32 = 48;
     const SPEED: f32 = 200.0;
 
-    pub fn init(allocator: std.mem.Allocator, screen_width: i32, screen_height: i32) !WorldScreen {
+    pub fn init(ctx: anytype) !WorldScreen {
+        const allocator = ctx.allocator;
+        const screen_width = ctx.screen_width;
+        const screen_height = ctx.screen_height;
+        const assets_cache = ctx.assets;
+
         // Load World
         var world = shared.World.loadFromFile(allocator, "assets/world_output.json") catch |err| blk: {
             std.debug.print("Could not load world_output.json: {}, falling back to world.json\n", .{err});
@@ -62,25 +68,16 @@ pub const WorldScreen = struct {
         errdefer world.deinit(allocator);
 
         // Assets
-        const assets = try CharacterAssets.loadMainCharacter();
-        errdefer assets.deinit();
+        // CharacterAssets handles its own loading for now, could be refactored later to use cache
+        const char_assets = try CharacterAssets.loadMainCharacter();
+        errdefer char_assets.deinit();
 
-        var tileset_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Tileset/Tileset Spring.png");
-        rl.imageColorReplace(&tileset_img, rl.Color.black, rl.Color.blank);
-        defer rl.unloadImage(tileset_img);
-        const tileset_texture = try rl.loadTextureFromImage(tileset_img);
-        errdefer rl.unloadTexture(tileset_texture);
+        const tileset_texture = try assets_cache.getTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Tileset/Tileset Spring.png");
+        const townhall_texture = try assets_cache.getTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
 
-        const townhall_img = try rl.loadImage("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png");
-        defer rl.unloadImage(townhall_img);
-        const townhall_texture = try rl.loadTextureFromImage(townhall_img);
-        errdefer rl.unloadTexture(townhall_texture);
-
-        const lake_img = try rl.loadImage("assets/lake_small.png");
-        defer rl.unloadImage(lake_img);
-        const lake_texture = try rl.loadTextureFromImage(lake_img);
+        // Lake texture specific filter
+        const lake_texture = try assets_cache.getTexture("assets/lake_small.png");
         rl.setTextureFilter(lake_texture, .point);
-        errdefer rl.unloadTexture(lake_texture);
 
         const grass = Frames{
             .SpringTiles = .{
@@ -88,8 +85,7 @@ pub const WorldScreen = struct {
             },
         };
 
-        const menu_texture = try rl.loadTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
-        errdefer rl.unloadTexture(menu_texture);
+        const menu_texture = try assets_cache.getTexture("assets/Farm RPG FREE 16x16 - Tiny Asset Pack/Menu/Main_menu.png");
         const top_menu = Menu.init(menu_texture, .{});
 
         // Player & Camera
@@ -115,41 +111,11 @@ pub const WorldScreen = struct {
             .server_port = 9999,
         });
 
-        // We need to move udp_client to heap if we want to pass pointer to thread nicely?
-        // Or we keep it in struct and pass pointer to struct field?
-        // BUT struct moves when returned from init...
-        // Main.zig did: var udp_client = ...; thread.spawn(..., &udp_client)
-        // Here we return the struct. The specific memory address will change.
-        // HACK: We should spawn thread AFTER returning or use a stable pointer (heap alloc).
-        // Let's postpone thread spawning to a start() method or alloc on heap.
-        // For simplicity, let's alloc on heap.
-
-        // Actually, let's keep it simple and spawn thread in init, BUT we MUST ensure
-        // the method caller keeps this struct pinned? No, Zig moves structs.
-        // Better: Don't spawn in init. Spawn in a separate 'start' method?
-        // Or allocate UdpClient on heap.
-
-        // Let's allocate UdpClient on heap to be safe.
-        // Wait, UdpClient contains `world: shared.World` by value?
-        // Checking udp_client.zig... yes `world: shared.World`.
-        // World contains pointers (buildings slice). Copying World struct is cheap (just slice headers).
-
-        // Re-reading main.zig...
-        // var udp_client = ...;
-        // const net_thread = spawn(..., &udp_client);
-        // This relies on udp_client staying at that stack address.
-
-        // So for WorldScreen, we should probably box UdpClient.
-        // But UdpClient is large? 2k buffer.
-
-        // Alternative: Pass `&self.udp_client` to thread. But `self` moves when `init` returns.
-        // Solution: `init` returns the struct. Then `main` calls `screen.start()`.
-
         return WorldScreen{
             .allocator = allocator,
             .world = world,
             .player = player,
-            .assets = assets,
+            .assets = char_assets,
             .game_state = game_state,
             .udp_client = udp_client,
             .net_thread = undefined, // Set in start()
@@ -180,11 +146,11 @@ pub const WorldScreen = struct {
         rl.unloadRenderTexture(self.minimap);
 
         self.top_menu.deinit();
-        rl.unloadTexture(self.menu_texture);
-
-        rl.unloadTexture(self.lake_texture);
-        rl.unloadTexture(self.townhall_texture);
-        rl.unloadTexture(self.tileset_texture);
+        // Textures loaded via AssetCache are not owned by us, do NOT unload them here (except maybe minimap)
+        // rl.unloadTexture(self.menu_texture);
+        // rl.unloadTexture(self.lake_texture);
+        // rl.unloadTexture(self.townhall_texture);
+        // rl.unloadTexture(self.tileset_texture);
 
         self.assets.deinit();
         self.world.deinit(self.allocator);
@@ -198,18 +164,19 @@ pub const WorldScreen = struct {
     fn buildAction() void {}
     fn settingsAction() void {}
 
-    pub fn draw(self: *WorldScreen, screen_width: i32, screen_height: i32) void {
-        const delta = rl.getFrameTime();
+    pub fn update(self: *WorldScreen, dt: f32, ctx: anytype) SceneAction {
+        _ = ctx; // potentially unused
+
         var move_cmd: ?MovementCommand = null;
 
         if (rl.isKeyDown(.w) or rl.isKeyDown(.up)) {
-            move_cmd = .{ .direction = .Up, .speed = SPEED, .delta = delta };
+            move_cmd = .{ .direction = .Up, .speed = SPEED, .delta = dt };
         } else if (rl.isKeyDown(.s) or rl.isKeyDown(.down)) {
-            move_cmd = .{ .direction = .Down, .speed = SPEED, .delta = delta };
+            move_cmd = .{ .direction = .Down, .speed = SPEED, .delta = dt };
         } else if (rl.isKeyDown(.a) or rl.isKeyDown(.left)) {
-            move_cmd = .{ .direction = .Left, .speed = SPEED, .delta = delta };
+            move_cmd = .{ .direction = .Left, .speed = SPEED, .delta = dt };
         } else if (rl.isKeyDown(.d) or rl.isKeyDown(.right)) {
-            move_cmd = .{ .direction = .Right, .speed = SPEED, .delta = delta };
+            move_cmd = .{ .direction = .Right, .speed = SPEED, .delta = dt };
         } else if (rl.isKeyPressed(.m)) {
             self.toggle_map();
         }
@@ -221,12 +188,31 @@ pub const WorldScreen = struct {
 
         // Camera Update
         self.camera.target = self.player.pos;
-        updateCameraFocus(&self.camera, self.player, screen_width, screen_height, self.world);
+        updateCameraFocus(&self.camera, self.player, @intFromFloat(self.camera.offset.x * 2 / self.camera.zoom), @intFromFloat(self.camera.offset.y * 2 / self.camera.zoom), self.world);
 
+        // Interpolate Local Player
+        if (self.game_state.sampleInterpolated()) |pos| {
+            self.player.pos = pos;
+        }
+
+        if (move_cmd) |cmd| {
+            self.player.update(dt, cmd.direction, true);
+        } else {
+            self.player.update(dt, .Down, false);
+        }
+
+        return .None;
+    }
+
+    pub fn draw(self: *WorldScreen, ctx: anytype) void {
+        const screen_width = ctx.screen_width;
+        const screen_height = ctx.screen_height;
         // Rendering
         var render_camera = self.camera;
         render_camera.target.x = @floor(self.camera.target.x * self.camera.zoom) / self.camera.zoom;
         render_camera.target.y = @floor(self.camera.target.y * self.camera.zoom) / self.camera.zoom;
+        // ensure offsets are correct based on current screen size (if resized)
+        render_camera.offset = .init(@as(f32, @floatFromInt(screen_width)) / 2.0, @as(f32, @floatFromInt(screen_height)) / 2.0);
 
         rl.beginMode2D(render_camera);
 
@@ -241,17 +227,6 @@ pub const WorldScreen = struct {
                 const other_player = entry.value_ptr.*;
                 drawOtherPlayer(other_player, self.assets);
             }
-        }
-
-        // Interpolate Local Player
-        if (self.game_state.sampleInterpolated()) |pos| {
-            self.player.pos = pos;
-        }
-
-        if (move_cmd) |cmd| {
-            self.player.update(delta, cmd.direction, true);
-        } else {
-            self.player.update(delta, .Down, false);
         }
 
         self.player.draw(self.assets) catch {};

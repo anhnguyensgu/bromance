@@ -2,19 +2,12 @@ const std = @import("std");
 const rl = @import("raylib");
 const shared = @import("shared.zig");
 
+const context = @import("core/context.zig");
+const scene_manager = @import("core/scene_manager.zig");
+const assets = @import("core/assets.zig");
+
 const LoginScreen = shared.LoginScreen;
-const WorldScreen = shared.WorldScreen;
 const HttpClient = shared.HttpClient;
-
-const ScreenType = enum {
-    Login,
-    World,
-};
-
-const Screen = union(ScreenType) {
-    Login: *LoginScreen,
-    World: *WorldScreen,
-};
 
 pub fn main() !void {
     try runRaylib();
@@ -36,9 +29,6 @@ pub fn runRaylib() anyerror!void {
     rl.setExitKey(.null);
     rl.setTargetFPS(60);
 
-    // Initial Screen: Login
-    // We allocate screens on the heap to avoid stack overflow or move issues.
-
     // Init HttpClient
     const http_client = try allocator.create(HttpClient);
     http_client.* = HttpClient.init(allocator);
@@ -46,58 +36,46 @@ pub fn runRaylib() anyerror!void {
         http_client.deinit();
         allocator.destroy(http_client);
     }
-    // Don't destroy http_client here, LoginScreen needs it.
-    // Ideally we should manage its lifecycle better (e.g. destroy when login is done or game exits).
-    // For now, let's defer destruction at end of main, assuming it lives for app duration or until login done.
 
-    var current_screen: Screen = .{ .Login = try allocator.create(LoginScreen) };
-    current_screen.Login.* = LoginScreen{
+    // Init Asset Cache
+    const asset_cache = try allocator.create(assets.AssetCache);
+    asset_cache.* = assets.AssetCache.init(allocator);
+    defer {
+        asset_cache.deinit();
+        allocator.destroy(asset_cache);
+    }
+
+    // Init Game Context
+    var ctx = context.GameContext.init(allocator, asset_cache, http_client, screen_width, screen_height);
+
+    // Initial Screen: Login
+    const login_screen = try allocator.create(LoginScreen);
+    login_screen.* = LoginScreen{
         .width = 400.0,
         .height = 300.0,
         .http_client = http_client,
     };
 
-    // We can also just keep a pointer to the current screen if we want polymorphism,
-    // but Zig unions are explicit.
+    var sm = scene_manager.SceneManager.init(allocator, .{ .Login = login_screen });
+    defer sm.deinit();
 
     // Main game loop
     while (!rl.windowShouldClose()) {
+        const dt = rl.getFrameTime();
+
+        // Update
+        // Capture error but maybe log and continue or exit?
+        sm.update(dt, &ctx) catch |err| {
+            std.debug.print("Error in update: {}\n", .{err});
+            // break; // Quit on error?
+        };
+
+        // Draw
         rl.beginDrawing();
         defer rl.endDrawing();
-
         rl.clearBackground(rl.Color.ray_white);
 
-        switch (current_screen) {
-            .Login => |login| {
-                const result = login.draw(screen_width, screen_height);
-                if (result == .Login) {
-                    allocator.destroy(login);
-
-                    const world_screen = try allocator.create(WorldScreen);
-                    errdefer allocator.destroy(world_screen);
-
-                    world_screen.* = try WorldScreen.init(allocator, screen_width, screen_height);
-                    try world_screen.start();
-
-                    current_screen = .{ .World = world_screen };
-                }
-            },
-            .World => |world| {
-                world.draw(screen_width, screen_height);
-                // Handle logout if implemented later
-            },
-        }
-    }
-
-    // Cleanup current screen on exit
-    switch (current_screen) {
-        .Login => |login| {
-            allocator.destroy(login);
-        },
-        .World => |world| {
-            world.deinit();
-            allocator.destroy(world);
-        },
+        sm.draw(&ctx);
     }
 }
 
@@ -137,4 +115,37 @@ test "aa" {
     var resp = try auth_proto.LoginResponse.decode(&r, allocator);
     defer resp.deinit(allocator);
     try std.testing.expect(resp.token.len > 0);
+}
+
+test "test grpc" {
+    const grpc = @import("grpc");
+    const auth_proto = @import("model/auth.pb.zig");
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    // 1. Connect to server
+    var client = try grpc.GrpcClient.init(allocator, "127.0.0.1", 50051);
+    defer client.deinit();
+
+    // 2. Create request
+    var req = auth_proto.LoginRequest{
+        .username = "user@example.com",
+        .password = "password123",
+    };
+
+    // 3. Serialize request
+    var buf = std.Io.Writer.Allocating.init(allocator);
+    defer buf.deinit();
+    try req.encode(&buf.writer, allocator);
+
+    // 4. Make RPC call
+    const resp_bytes = try client.call("/auth.AuthService/Login", buf.written(), .none);
+    defer allocator.free(resp_bytes);
+
+    // 5. Deserialize response
+    var reader: std.Io.Reader = .fixed(resp_bytes);
+    var resp = try auth_proto.LoginResponse.decode(&reader, allocator);
+    defer resp.deinit(allocator);
+
+    std.debug.print("Token: {s}\n", .{resp.token});
 }

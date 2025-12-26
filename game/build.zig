@@ -48,7 +48,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const raylib = raylib_dep.module("raylib"); // main raylib module
-    const raygui = raylib_dep.module("raygui"); // raygui module
     const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
 
     // VERY IMPORTANT: Expose the "protobuf" module to your client
@@ -82,7 +81,6 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibrary(raylib_artifact);
     exe.root_module.addImport("raylib", raylib);
-    exe.root_module.addImport("raygui", raygui);
     exe.root_module.addImport("protobuf", protobuf_dep.module("protobuf"));
     exe.root_module.addImport("grpc", grpc_mod);
 
@@ -121,7 +119,6 @@ pub fn build(b: *std.Build) void {
     const inspector_exe = b.addExecutable(.{ .name = "tile-inspector", .root_module = inspector_mod });
     inspector_exe.linkLibrary(raylib_artifact);
     inspector_exe.root_module.addImport("raylib", raylib);
-    inspector_exe.root_module.addImport("raygui", raygui);
     b.installArtifact(inspector_exe);
     const run_inspector = b.addRunArtifact(inspector_exe);
     run_inspector.step.dependOn(b.getInstallStep());
