@@ -1,27 +1,25 @@
 const std = @import("std");
 const rl = @import("raylib");
+const layout = @import("../ui/layout.zig");
 const widgets = @import("../ui/widgets.zig");
 const HttpClient = @import("../client/http_client.zig").HttpClient;
+const SceneAction = @import("../core/scene_action.zig").SceneAction;
 
 pub const LoginScreen = struct {
-    username_buf: [32]u8 = std.mem.zeroes([32]u8),
+    username_buf: [32:0]u8 = std.mem.zeroes([32:0]u8),
     username_len: usize = 0,
-    password_buf: [32]u8 = std.mem.zeroes([32]u8),
+    password_buf: [32:0]u8 = std.mem.zeroes([32:0]u8),
     password_len: usize = 0,
     focused_field: enum { Username, Password } = .Username,
     width: f32 = 300.0,
     height: f32 = 250.0, // Increased height for password field
     http_client: *HttpClient,
+    is_dev: bool = true,
 
     // Result of the login attempt
     pub const Result = enum {
         None,
         Login,
-    };
-
-    pub const SceneAction = union(enum) {
-        None,
-        SwitchToWorld,
     };
 
     pub fn update(self: *LoginScreen, _: f32, _: anytype) SceneAction {
@@ -36,53 +34,82 @@ pub const LoginScreen = struct {
     }
 
     pub fn draw(self: *LoginScreen, ctx: anytype) void {
+        const title = layout.takeTop(self.renderPanel(ctx), 20, 15);
+        var cursor = title.rest;
+
+        rl.drawText("Welcome!", @intFromFloat(title.head.x), @intFromFloat(title.head.y), 20, .dark_gray);
+
+        self.drawUsernameInput(&cursor);
+        self.drawPasswordInput(&cursor);
+
+        // Login Button
+        const spacer = layout.takeTop(cursor, 5, 0);
+        cursor = spacer.rest;
+        const btn_rect = widgets.Button(*LoginScreen){
+            .onClick = LoginScreen.login,
+            .onClickContext = self,
+            .rect = layout.takeTop(cursor, 40, 0).head,
+            .text = "LOGIN",
+        };
+        btn_rect.draw();
+    }
+
+    pub fn renderPanel(self: *LoginScreen, ctx: anytype) rl.Rectangle {
         const screen_width = ctx.screen_width;
         const screen_height = ctx.screen_height;
 
-        const x = (@as(f32, @floatFromInt(screen_width)) - self.width) / 2.0;
-        const y = (@as(f32, @floatFromInt(screen_height)) - self.height) / 2.0;
+        const screen_rect = rl.Rectangle{
+            .x = 0,
+            .y = 0,
+            .width = @floatFromInt(screen_width),
+            .height = @floatFromInt(screen_height),
+        };
+        const panel_rect = layout.center(screen_rect, self.width, self.height);
+        const panel = widgets.Panel{ .rect = panel_rect };
 
-        // Draw background
-        rl.drawRectangleRec(rl.Rectangle{ .x = x, .y = y, .width = self.width, .height = self.height }, .ray_white);
-        rl.drawRectangleLinesEx(rl.Rectangle{ .x = x, .y = y, .width = self.width, .height = self.height }, 1, .light_gray);
+        panel.draw();
+        return panel.contentRect();
+    }
 
-        const content_x = x + 20;
-        var current_y = y + 40;
+    fn drawUsernameInput(self: *LoginScreen, cursor: *rl.Rectangle) void {
+        const label_slice = layout.takeTop(cursor.*, 10, 5);
+        cursor.* = label_slice.rest;
+        rl.drawText("Username", @intFromFloat(label_slice.head.x), @intFromFloat(label_slice.head.y), 10, .gray);
 
-        rl.drawText("Welcome!", @intFromFloat(content_x), @intFromFloat(current_y - 30), 20, .dark_gray);
+        const input_slice = layout.takeTop(cursor.*, 30, 15);
+        cursor.* = input_slice.rest;
+        const input_rect = input_slice.head;
+        if (rl.isMouseButtonPressed(.left) and rl.checkCollisionPointRec(rl.getMousePosition(), input_rect)) {
+            self.focused_field = .Username;
+        }
 
-        // --- Username ---
-        rl.drawText("Username", @intFromFloat(content_x), @intFromFloat(current_y), 10, .gray);
-        current_y += 15;
-
-        const username_rect = rl.Rectangle{ .x = content_x, .y = current_y, .width = self.width - 40, .height = 30 };
         const username_input = widgets.Input{
-            .rect = username_rect,
+            .rect = input_rect,
             .text = self.username_buf[0..self.username_len :0],
             .is_focused = self.focused_field == .Username,
         };
         username_input.draw();
+    }
 
-        current_y += 40;
+    fn drawPasswordInput(self: *LoginScreen, cursor: *rl.Rectangle) void {
+        const label_slice = layout.takeTop(cursor.*, 10, 5);
+        cursor.* = label_slice.rest;
+        rl.drawText("Password", @intFromFloat(label_slice.head.x), @intFromFloat(label_slice.head.y), 10, rl.Color.gray);
 
-        // --- Password ---
-        rl.drawText("Password", @intFromFloat(content_x), @intFromFloat(current_y), 10, rl.Color.gray);
-        current_y += 15;
+        const input_slice = layout.takeTop(cursor.*, 30, 15);
+        cursor.* = input_slice.rest;
+        const input_rect = input_slice.head;
+        if (rl.isMouseButtonPressed(.left) and rl.checkCollisionPointRec(rl.getMousePosition(), input_rect)) {
+            self.focused_field = .Password;
+        }
 
-        const password_rect = rl.Rectangle{ .x = content_x, .y = current_y, .width = self.width - 40, .height = 30 };
         const password_input = widgets.Input{
-            .rect = password_rect,
+            .rect = input_rect,
             .text = self.password_buf[0..self.password_len :0],
             .is_focused = self.focused_field == .Password,
             .input_type = .Password,
         };
         password_input.draw();
-
-        current_y += 45;
-
-        // Login Button
-        const btn_rect = widgets.Button(*LoginScreen){ .onClick = LoginScreen.login, .onClickContext = self, .rect = rl.Rectangle{ .x = content_x, .y = current_y, .width = self.width - 40, .height = 40 }, .text = "LOGIN" };
-        btn_rect.draw();
     }
 
     fn handleInput(self: *LoginScreen) Result {
@@ -91,47 +118,9 @@ pub const LoginScreen = struct {
             self.focused_field = if (self.focused_field == .Username) .Password else .Username;
         }
 
-        // Character Input
-        while (true) {
-            const char = rl.getCharPressed();
-            if (char == 0) break;
-
-            if (char >= 32 and char <= 125) {
-                switch (self.focused_field) {
-                    .Username => {
-                        if (self.username_len < 31) {
-                            self.username_buf[self.username_len] = @intCast(char);
-                            self.username_len += 1;
-                            self.username_buf[self.username_len] = 0;
-                        }
-                    },
-                    .Password => {
-                        if (self.password_len < 31) {
-                            self.password_buf[self.password_len] = @intCast(char);
-                            self.password_len += 1;
-                            self.password_buf[self.password_len] = 0;
-                        }
-                    },
-                }
-            }
-        }
-
-        // Backspace
-        if (rl.isKeyPressed(.backspace)) {
-            switch (self.focused_field) {
-                .Username => {
-                    if (self.username_len > 0) {
-                        self.username_len -= 1;
-                        self.username_buf[self.username_len] = 0;
-                    }
-                },
-                .Password => {
-                    if (self.password_len > 0) {
-                        self.password_len -= 1;
-                        self.password_buf[self.password_len] = 0;
-                    }
-                },
-            }
+        switch (self.focused_field) {
+            .Username => widgets.handleFieldInput(self.username_buf[0..], &self.username_len),
+            .Password => widgets.handleFieldInput(self.password_buf[0..], &self.password_len),
         }
 
         // Enter to login
@@ -149,6 +138,9 @@ pub const LoginScreen = struct {
     }
 
     pub fn login(self: *LoginScreen) void {
+        if (self.is_dev) {
+            return;
+        }
         std.debug.print("login: {s}\n", .{self.getUsername()});
         // We'll ignore the error for now or handle it better later
         _ = self.http_client.login(self.getUsername(), self.password_buf[0..self.password_len]) catch |err| {

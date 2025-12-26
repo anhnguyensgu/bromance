@@ -21,6 +21,7 @@ const Menu = ui_menu.Menu;
 
 const Frames = shared.Frames;
 const LandscapeTile = shared.LandscapeTile;
+const SceneAction = @import("../core/scene_action.zig").SceneAction;
 
 pub const WorldScreen = struct {
     allocator: std.mem.Allocator,
@@ -52,11 +53,6 @@ pub const WorldScreen = struct {
     const UI_MARGIN_PX: i32 = 32;
     const MENU_HEIGHT: i32 = 48;
     const SPEED: f32 = 200.0;
-
-    pub const SceneAction = union(enum) {
-        None,
-        SwitchToLogin,
-    };
 
     pub fn init(ctx: anytype) !WorldScreen {
         const allocator = ctx.allocator;

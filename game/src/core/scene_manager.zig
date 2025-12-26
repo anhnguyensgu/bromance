@@ -1,36 +1,20 @@
 const std = @import("std");
 const context = @import("context.zig");
+const scene_action = @import("scene_action.zig");
 const LoginScreen = @import("../screens/login.zig").LoginScreen;
 const WorldScreen = @import("../screens/world.zig").WorldScreen;
 
-pub const SceneAction = union(enum) {
-    None,
-    SwitchToLogin,
-    SwitchToWorld,
-    Quit,
-};
+pub const SceneAction = scene_action.SceneAction;
 
 pub const Scene = union(enum) {
     Login: *LoginScreen,
     Gameplay: *WorldScreen,
 
     pub fn update(self: Scene, dt: f32, ctx: *context.GameContext) !SceneAction {
-        switch (self) {
-            .Login => |s| {
-                const action = s.update(dt, ctx);
-                switch (action) {
-                    .None => return .None,
-                    .SwitchToWorld => return .SwitchToWorld,
-                }
-            },
-            .Gameplay => |s| {
-                const action = s.update(dt, ctx);
-                switch (action) {
-                    .None => return .None,
-                    .SwitchToLogin => return .SwitchToLogin,
-                }
-            },
-        }
+        return switch (self) {
+            .Login => |s| s.update(dt, ctx),
+            .Gameplay => |s| s.update(dt, ctx),
+        };
     }
 
     pub fn draw(self: Scene, ctx: *context.GameContext) void {
