@@ -18,7 +18,7 @@ pub const Terrain = struct {
     pub const DIRT: TerrainId = 5;
 };
 
-/// Factory to create auto-tile configs for the "Tileset Spring.png" tileset
+/// Factory to create auto-tile configs for the "tilesetspring.png" tileset
 /// This tileset uses 16x16 tiles
 pub const TilesetSpring = struct {
     /// Road tiles starting at (8, 0) - uses 4x4 Layout B (RPG Maker style)
@@ -108,7 +108,7 @@ pub const MultiLayerTileMap = struct {
         // self.renderer.drawLayerWithOffset(self.paths, offset_x, offset_y, tile_w, tile_h);
     }
 
-    /// Create a tile map from a world_edit.json file for the background layer.
+    /// Create a tile map from a worldedit.json file for the background layer.
     /// Background cells default to GRASS (1), with WATER (3) and ROAD (2) applied from the JSON.
     pub fn initFromWorldEditFile(allocator: std.mem.Allocator, texture: rl.Texture2D, path: []const u8) !MultiLayerTileMap {
         var renderer = AutoTileRenderer.init(allocator, texture);

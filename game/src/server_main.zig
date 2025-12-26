@@ -37,7 +37,7 @@ const UdpEchoServer = struct {
         _ = try posix.fcntl(sock, posix.F.SETFL, flags);
 
         // Load world data for collision detection
-        const world = try shared.World.loadFromFile(allocator, "assets/world_output.json");
+        const world = try shared.World.loadFromFile(allocator, "assets/worldoutput.json");
 
         const now: i64 = @intCast(std.time.nanoTimestamp());
 

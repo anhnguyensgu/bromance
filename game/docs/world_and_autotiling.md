@@ -12,9 +12,9 @@ The main ideas:
 
 ## 1. Current Situation
 
-### 1.1 `zig-client/assets/world_edit.json`
+### 1.1 `zig-client/assets/worldedit.json`
 
-`zig-client/assets/world_edit.json` currently looks like:
+`zig-client/assets/worldedit.json` currently looks like:
 
 - A `world` object with:
   - `width`, `height` in pixels
@@ -23,7 +23,7 @@ The main ideas:
 
 Example (simplified):
 
-```/dev/null/world_edit_example.json#L1-32
+```/dev/null/worldedit_example.json#L1-32
 {
   "world": {
     "width": 192,
@@ -161,7 +161,7 @@ Collision logic (`checkBuildingCollision`) must:
 
 ### 3.2 Consequences
 
-- `world_edit.json` must describe a **full terrain grid** (every tile).
+- `worldedit.json` must describe a **full terrain grid** (every tile).
 - We no longer rely on radial fallback rules at runtime.
 - Roads become a **terrain concern**: the fact that a tile is `.Road` lives in the terrain grid, not solely in the buildings list.
 
@@ -171,13 +171,13 @@ This also makes the world fully data-driven: what you see in the editor (tiles) 
 
 ## 4. Proposed JSON Schema: Add a Tiles Grid
 
-To support a full terrain grid, extend `world_edit.json` with a `tiles` field.
+To support a full terrain grid, extend `worldedit.json` with a `tiles` field.
 
 ### 4.1 Encoding the terrain grid
 
 We keep the existing structure but add `tiles`:
 
-```/dev/null/world_edit_with_tiles.json#L1-80
+```/dev/null/worldedit_with_tiles.json#L1-80
 {
   "world": {
     "width": 192,
@@ -399,7 +399,7 @@ To avoid breaking the game while refactoring, here is a staged approach.
 
 ### 7.1 Phase 1 – Add Tiles, Keep Fallback
 
-- Add the `tiles` field to `World` and `world_edit.json`.
+- Add the `tiles` field to `World` and `worldedit.json`.
 - In `loadFromFile`:
   - If `tiles` exists in JSON:
     - Parse it and fill `World.tiles`.
@@ -413,7 +413,7 @@ This keeps existing behavior while allowing new worlds to be fully tile-driven.
 
 ### 7.2 Phase 2 – Generate Tiles for Existing Worlds
 
-- For existing `world_edit.json` files that don’t have `tiles`:
+- For existing `worldedit.json` files that don’t have `tiles`:
   - Temporarily run a tool (or debug code) that:
     - For each `tx, ty`, runs the old `getTileAtGrid` / `getTileAtPosition`.
     - Records the resulting `TerrainType` into a `tiles` array.
@@ -446,10 +446,10 @@ This keeps existing behavior while allowing new worlds to be fully tile-driven.
 
 The proposed direction:
 
-1. **Add a terrain grid** (`tiles`) to `world_edit.json`.
+1. **Add a terrain grid** (`tiles`) to `worldedit.json`.
 2. Store a `TerrainType` for every tile `(tx, ty)`.
 3. Make `World.getTileAtGrid` and `getTileAtPosition` read only from `tiles`.
 4. Treat buildings as a separate layer for visuals and collision.
 5. Drive `computeBitmask` and road drawing entirely from the terrain grid.
 
-With this design, `world_edit.json` truly “contains all tiles in the map,” and autotiling becomes predictable even when buildings occupy multiple tiles.
+With this design, `worldedit.json` truly “contains all tiles in the map,” and autotiling becomes predictable even when buildings occupy multiple tiles.
