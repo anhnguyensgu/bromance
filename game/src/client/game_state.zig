@@ -270,7 +270,7 @@ pub const ClientGameState = struct {
             new_pos.y = std.math.clamp(new_pos.y, 0.0, max_y);
 
             // Collision
-            const collision = world.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, cmd.direction);
+            const collision = world.checkCollisionAll(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, cmd.direction);
             if (!collision) {
                 pos = new_pos;
             }

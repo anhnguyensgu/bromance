@@ -174,6 +174,7 @@ pub fn main() !void {
     const menu_texture = try rl.loadTexture("assets/farmrpg/menu/mainmenu.png");
     defer rl.unloadTexture(menu_texture);
     var menu = Menu.init(menu_texture, .{});
+    menu.is_open = true;
     defer menu.deinit();
 
     const frames = [_]sheets.SpriteSet{ grass, .{
@@ -200,7 +201,7 @@ pub fn main() !void {
                 },
                 .Road => |ts| {
                     for (ts.descriptors) |desc| {
-                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Road", .Tile, desc, ts.texture2D);
+                        try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Road", .Road, desc, ts.texture2D);
                     }
                 },
                 else => {},
@@ -224,28 +225,49 @@ pub fn main() !void {
 
     try addMenuItem(&menu_items_list, &placeable_ptrs, allocator, "Eraser", .Eraser, .{ .x = 0, .y = 0, .width = 16, .height = 16 }, eraser_tex);
 
-    // Restore placed items from loaded world buildings
+    // Restore placed items from loaded world buildings.
+    // Use sprite_x/y/width/height from the world file so variant tiles render correctly.
     const w_tile_w = world.width / @as(f32, @floatFromInt(world.tiles_x));
     const w_tile_h = world.height / @as(f32, @floatFromInt(world.tiles_y));
 
     for (world.buildings) |b| {
-        const b_type_name = @tagName(b.building_type);
-        // Find matching item in menu list to get correct sprite/data
-        for (menu_items_list.items) |menu_item| {
-            if (menu_item.data) |data_ptr| {
-                const placeable = @as(*const PlaceableItem, @ptrCast(@alignCast(data_ptr)));
-                if (std.mem.eql(u8, placeable.item_type.toString(), b_type_name)) {
-                    // Found match, create placed item
-                    const px = @as(f32, @floatFromInt(b.tile_x)) * w_tile_w;
-                    const py = @as(f32, @floatFromInt(b.tile_y)) * w_tile_h;
-                    const pw = @as(f32, @floatFromInt(b.width_tiles)) * w_tile_w;
-                    const ph = @as(f32, @floatFromInt(b.height_tiles)) * w_tile_h;
+        const texture = switch (b.building_type) {
+            .Townhall, .House => house_texture,
+            .Lake => lake_texture,
+            .Road, .Tile => tileset_texture,
+            else => continue,
+        };
 
-                    try placed_items.append(allocator, .{ .data = placeable.*, .rect = rl.Rectangle{ .x = px, .y = py, .width = pw, .height = ph } });
-                    break;
-                }
-            }
-        }
+        const item_type: placement.ItemType = switch (b.building_type) {
+            .Townhall, .House => .House,
+            .Lake => .Lake,
+            .Road => .Road,
+            .Tile => .Tile,
+            else => .Tile,
+        };
+
+        const px = @as(f32, @floatFromInt(b.tile_x)) * w_tile_w;
+        const py = @as(f32, @floatFromInt(b.tile_y)) * w_tile_h;
+        const pw = @as(f32, @floatFromInt(b.width_tiles)) * w_tile_w;
+        const ph = @as(f32, @floatFromInt(b.height_tiles)) * w_tile_h;
+
+        const sprite = sheets.SpriteRect{
+            .x = b.sprite_x,
+            .y = b.sprite_y,
+            .width = b.sprite_width,
+            .height = b.sprite_height,
+        };
+
+        const data = PlaceableItem{
+            .sprite = sprite,
+            .texture = texture,
+            .item_type = item_type,
+        };
+
+        try placed_items.append(allocator, .{
+            .data = data,
+            .rect = rl.Rectangle{ .x = px, .y = py, .width = pw, .height = ph },
+        });
     }
 
     var ghost_layer = GhostLayer{
@@ -334,7 +356,7 @@ pub fn main() !void {
         placement_system.setBounds(world.tiles_x, world.tiles_y);
 
         // Draw Menu in Sidebar (using Menu component)
-        menu.drawAsSidebar(SIDEBAR_WIDTH, screen_height, menu_items_list.items, &active_menu_idx);
+        menu.drawAsSidebar(SIDEBAR_WIDTH, screen_height, menu_items_list.items, &active_menu_idx, "Construction");
 
         // Check if menu selection changed to update placement state
         if (active_menu_idx) |idx| {
@@ -391,6 +413,7 @@ fn saveWorld() void {
     defer json_buildings.deinit(g_allocator.?);
 
     for (items.items) |item| {
+        std.debug.print("building sprice x {} y {}\n", .{ item.data.sprite.x, item.data.sprite.y });
         const tile_x = @divFloor(@as(i32, @intFromFloat(item.rect.x)), @as(i32, @intCast(map.tile_width)));
         const tile_y = @divFloor(@as(i32, @intFromFloat(item.rect.y)), @as(i32, @intCast(map.tile_height)));
         const width_tiles = @divFloor(@as(i32, @intFromFloat(item.rect.width)), @as(i32, @intCast(map.tile_width)));

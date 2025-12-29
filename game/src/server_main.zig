@@ -226,7 +226,7 @@ const UdpEchoServer = struct {
         new_pos.x = std.math.clamp(new_pos.x, 0.0, max_x);
         new_pos.y = std.math.clamp(new_pos.y, 0.0, max_y);
 
-        const collision = self.world.checkBuildingCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE);
+        const collision = self.world.checkCollisionAll(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
 
         if (!collision) {
             pos.* = new_pos;

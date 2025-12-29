@@ -85,16 +85,16 @@ pub const WorldScreen = struct {
             },
         };
 
-        const menu_texture = try assets_cache.getTexture("assets/farmrpg/menu/mainmenu.png");
+        const menu_texture = try assets_cache.getTexture("assets/interface/0.png");
         const top_menu = Menu.init(menu_texture, .{});
 
         // Player & Camera
-        const player = Character.init(rl.Vector2{ .x = 350, .y = 200 }, rl.Vector2{ .x = 32, .y = 32 });
+        const player = Character.init(rl.Vector2{ .x = 350, .y = 200 }, rl.Vector2{ .x = 16, .y = 16 });
         const camera = rl.Camera2D{
             .target = .init(player.pos.x + 20, player.pos.y + 20),
             .offset = .init(@as(f32, @floatFromInt(screen_width)) / 2.0, @as(f32, @floatFromInt(screen_height)) / 2.0),
             .rotation = 0,
-            .zoom = 1,
+            .zoom = 2,
         };
 
         // Minimap
@@ -163,6 +163,22 @@ pub const WorldScreen = struct {
     fn inventoryAction() void {}
     fn buildAction() void {}
     fn settingsAction() void {}
+    fn onMapAction(ctx: ?*anyopaque) void {
+        const self: *WorldScreen = @ptrCast(@alignCast(ctx orelse return));
+        self.toggle_map();
+    }
+    fn onInventoryAction(ctx: ?*anyopaque) void {
+        _ = ctx;
+        inventoryAction();
+    }
+    fn onBuildAction(ctx: ?*anyopaque) void {
+        _ = ctx;
+        buildAction();
+    }
+    fn onSettingsAction(ctx: ?*anyopaque) void {
+        _ = ctx;
+        settingsAction();
+    }
 
     pub fn update(self: *WorldScreen, dt: f32, ctx: anytype) SceneAction {
         _ = ctx; // potentially unused
@@ -217,7 +233,7 @@ pub const WorldScreen = struct {
         rl.beginMode2D(render_camera);
 
         shared.drawGrassBackground(self.grass, self.world);
-        drawConstruction(self.townhall_texture, self.lake_texture, self.world);
+        drawConstruction(self.townhall_texture, self.lake_texture, self.tileset_texture, self.world);
 
         // Draw Other Players
         {
@@ -248,14 +264,8 @@ pub const WorldScreen = struct {
         // Let's handle keys directly for now to be safe and avoid static globals.
         // I will stub the menu actions.
 
-        const menu_items = [_]MenuItem{
-            .{ .label = "Map", .action = buildAction }, // Placeholder
-            .{ .label = "Inventory", .action = inventoryAction },
-            .{ .label = "Build", .action = buildAction },
-            .{ .label = "Settings", .action = settingsAction },
-        };
-
-        self.top_menu.draw(200, menu_items[0..], &self.active_menu_item);
+        const menu_items = [_]MenuItem{};
+        self.top_menu.drawAsSidebar(250, screen_height, menu_items[0..], &self.active_menu_item, "Construction");
 
         if (self.map_opened) {
             const minimap_pos = rl.Vector2{
@@ -267,8 +277,10 @@ pub const WorldScreen = struct {
 
         var buf: [128]u8 = undefined;
         const pos_text = std.fmt.bufPrintZ(&buf, "Player: ({:.0}, {:.0})", .{ self.player.pos.x, self.player.pos.y }) catch "";
-        rl.drawText(pos_text, UI_MARGIN_PX + 10, MENU_HEIGHT + 10, 20, .dark_gray);
-        rl.drawFPS(10, MENU_HEIGHT + 10);
+        const pos_x = screen_width - 300;
+        const pos_y = 10;
+        rl.drawText(pos_text, pos_x, pos_y, 20, .dark_gray);
+        rl.drawFPS(pos_x, pos_y + 24);
     }
 };
 
@@ -277,25 +289,15 @@ pub const WorldScreen = struct {
 fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
     const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;
     const view_half_h: f32 = (@as(f32, @floatFromInt(screen_height)) * 0.5) / camera.zoom;
-
     var cam_target_x: f32 = player.pos.x + player.size.x * 0.5;
     var cam_target_y: f32 = player.pos.y + player.size.y * 0.5;
 
-    if (world.width > view_half_w * 2) {
-        cam_target_x = std.math.clamp(cam_target_x, view_half_w, world.width - view_half_w);
-    } else {
-        cam_target_x = world.width * 0.5;
-    }
-    if (world.height > view_half_h * 2) {
-        cam_target_y = std.math.clamp(cam_target_y, view_half_h, world.height - view_half_h);
-    } else {
-        cam_target_y = world.height * 0.5;
-    }
-
+    cam_target_x = std.math.clamp(cam_target_x, view_half_w * 2, world.width - view_half_w * 2);
+    cam_target_y = std.math.clamp(cam_target_y, view_half_h * 2, world.height - view_half_h * 2);
     camera.target = .init(cam_target_x, cam_target_y);
 }
 
-fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, world: shared.World) void {
+fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, tileset_texture: rl.Texture2D, world: shared.World) void {
     const tile_w = world.width / @as(f32, @floatFromInt(world.tiles_x));
     const tile_h = world.height / @as(f32, @floatFromInt(world.tiles_y));
 
@@ -320,6 +322,7 @@ fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, 
         const texture = switch (building.building_type) {
             .Townhall, .House => townhall_texture,
             .Lake => lake_texture,
+            .Tile, .Road => tileset_texture,
             else => continue,
         };
 
@@ -338,7 +341,7 @@ fn drawOtherPlayer(other_player: anytype, assets: CharacterAssets) void {
         .width = 32,
         .height = 32,
     };
-    rl.drawTexturePro(assets.shadow, rl.Rectangle{ .x = 0, .y = 0, .width = 32, .height = 32 }, shadow_dest, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
+    rl.drawTexturePro(assets.shadow, .{ .x = 0, .y = 0, .width = 32, .height = 32 }, shadow_dest, .{ .x = 0, .y = 0 }, 0, .white);
 
     const texture = if (is_moving) switch (other_player.dir) {
         .Up => assets.walk_up,
@@ -397,6 +400,7 @@ fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: shar
                 .Farm => rl.Color.green,
                 .Lake => rl.Color.blue,
                 .Road => rl.Color.brown,
+                .Tile => rl.Color.gray,
             };
 
             rl.drawRectangle(@intFromFloat(minimap_x), @intFromFloat(minimap_y), @intFromFloat(minimap_w), @intFromFloat(minimap_h), building_color);

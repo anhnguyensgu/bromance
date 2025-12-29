@@ -48,6 +48,7 @@ pub const BuildingType = enum {
     Farm,
     Lake,
     Road,
+    Tile,
 };
 
 // Building instance on the map - self-contained with all properties
@@ -229,6 +230,9 @@ pub const World = struct {
         return terrain == .Grass or terrain == .Road;
     }
 
+    // Terrain collision uses direction to only sample the leading edge of movement
+    // (e.g. moving up checks top corners). This avoids "sticky" collisions when
+    // sliding along edges. Building collision is full AABB, so it doesn't need direction.
     pub fn checkCollision(self: World, x: f32, y: f32, w: f32, h: f32, direction: command.MoveDirection) bool {
         // Define hitbox corners
         const left = x;
@@ -260,6 +264,11 @@ pub const World = struct {
             },
         }
         return false;
+    }
+
+    // Unified collision: terrain (directional) + buildings (AABB).
+    pub fn checkCollisionAll(self: World, x: f32, y: f32, w: f32, h: f32, direction: command.MoveDirection) bool {
+        return self.checkCollision(x, y, w, h, direction) or self.checkBuildingCollision(x, y, w, h);
     }
 
     pub fn checkBuildingCollision(self: World, x: f32, y: f32, w: f32, h: f32) bool {
@@ -299,6 +308,7 @@ pub const World = struct {
 
         return false;
     }
+
     pub fn tileToWorldX(self: World, tile_x: i32) f32 {
         const tile_w = self.width / @as(f32, @floatFromInt(self.tiles_x));
         return @as(f32, @floatFromInt(tile_x)) * tile_w;
@@ -445,6 +455,7 @@ fn parseBuildingType(type_str: []const u8) ?BuildingType {
     if (std.mem.eql(u8, type_str, "Farm")) return .Farm;
     if (std.mem.eql(u8, type_str, "Lake")) return .Lake;
     if (std.mem.eql(u8, type_str, "Road")) return .Road;
+    if (std.mem.eql(u8, type_str, "Tile")) return .Tile;
     return null;
 }
 

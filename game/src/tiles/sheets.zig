@@ -42,7 +42,7 @@ pub const MenuSprites = struct {
     pub fn init(text: rl.Texture2D) Self {
         return .{
             .descriptors = .{
-                .{ .x = 95, .y = 3, .width = 83, .height = 172 }, // header strip
+                .{ .x = 30, .y = 50, .width = 300, .height = 320 }, // header strip
                 .{ .x = 64.0, .y = 0.0, .width = 64.0, .height = 64.0 }, // button tile
             },
             .texture2D = text,

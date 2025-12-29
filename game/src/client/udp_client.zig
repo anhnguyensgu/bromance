@@ -177,7 +177,7 @@ pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand, world: shared.
     new_pos.y = std.math.clamp(new_pos.y, 0.0, max_y);
 
     // Check collision at new position
-    const collision = world.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
+    const collision = world.checkCollisionAll(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
 
     if (!collision) {
         pos.* = new_pos;
