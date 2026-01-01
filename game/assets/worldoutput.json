@@ -1,21 +1,153 @@
 {
   "world": {
-    "width": 640,
-    "height": 640,
-    "tiles_x": 40,
-    "tiles_y": 40
+    "width": 1280,
+    "height": 1280,
+    "tiles_x": 80,
+    "tiles_y": 80
   },
   "buildings": [
     {
-      "type": "House",
-      "tile_x": 5,
+      "type": "Road",
+      "tile_x": 3,
       "tile_y": 8,
-      "width_tiles": 5,
-      "height_tiles": 7,
-      "sprite_x": 150,
-      "sprite_y": 0,
-      "sprite_width": 74,
-      "sprite_height": 112
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 128,
+      "sprite_y": 192,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 4,
+      "tile_y": 8,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 176,
+      "sprite_y": 192,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 4,
+      "tile_y": 9,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 144,
+      "sprite_y": 224,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 3,
+      "tile_y": 9,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 144,
+      "sprite_y": 224,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 5,
+      "tile_y": 9,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 176,
+      "sprite_y": 192,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 5,
+      "tile_y": 10,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 160,
+      "sprite_y": 224,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 4,
+      "tile_y": 10,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 176,
+      "sprite_y": 240,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 6,
+      "tile_y": 10,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 176,
+      "sprite_y": 192,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 6,
+      "tile_y": 11,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 176,
+      "sprite_y": 240,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 5,
+      "tile_y": 11,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 128,
+      "sprite_y": 240,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 3,
+      "tile_y": 10,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 128,
+      "sprite_y": 240,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 2,
+      "tile_y": 9,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 128,
+      "sprite_y": 192,
+      "sprite_width": 16,
+      "sprite_height": 16
+    },
+    {
+      "type": "Road",
+      "tile_x": 2,
+      "tile_y": 10,
+      "width_tiles": 1,
+      "height_tiles": 1,
+      "sprite_x": 128,
+      "sprite_y": 240,
+      "sprite_width": 16,
+      "sprite_height": 16
     },
     {
       "type": "House",
@@ -27,17 +159,7 @@
       "sprite_y": 0,
       "sprite_width": 74,
       "sprite_height": 112
-    },
-    {
-      "type": "House",
-      "tile_x": 18,
-      "tile_y": 8,
-      "width_tiles": 5,
-      "height_tiles": 7,
-      "sprite_x": 150,
-      "sprite_y": 0,
-      "sprite_width": 74,
-      "sprite_height": 112
     }
-  ]
+  ],
+  "plots": []
 }

@@ -4,10 +4,75 @@ const posix = std.posix;
 const shared = @import("shared.zig");
 const network = shared.network;
 
+fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    const file_size = try file.getEndPos();
+    const buffer = try allocator.alloc(u8, file_size);
+    defer allocator.free(buffer);
+    _ = try file.readAll(buffer);
+
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        allocator,
+        buffer,
+        .{},
+    );
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    const plots_array = root.get("plots").?.array;
+
+    const plots = try allocator.alloc(shared.Plot, plots_array.items.len);
+
+    for (plots_array.items, 0..) |plot_obj, i| {
+        const obj = plot_obj.object;
+        const id = @as(u64, @intCast(obj.get("id").?.integer));
+        const tile_x = @as(i32, @intCast(obj.get("tile_x").?.integer));
+        const tile_y = @as(i32, @intCast(obj.get("tile_y").?.integer));
+        const width_tiles = @as(i32, @intCast(obj.get("width_tiles").?.integer));
+        const height_tiles = @as(i32, @intCast(obj.get("height_tiles").?.integer));
+
+        var owner = shared.OwnerId.none();
+        if (obj.get("owner")) |owner_obj| {
+            const owner_data = owner_obj.object;
+            const kind_str = owner_data.get("kind").?.string;
+            const kind = parseOwnerIdKind(kind_str) orelse .none;
+
+            if (owner_data.get("value")) |value_str| {
+                owner = shared.OwnerId.init(kind, value_str.string);
+            } else {
+                owner = shared.OwnerId{ .kind = kind };
+            }
+        }
+
+        plots[i] = shared.Plot{
+            .id = id,
+            .tile_x = tile_x,
+            .tile_y = tile_y,
+            .width_tiles = width_tiles,
+            .height_tiles = height_tiles,
+            .owner = owner,
+        };
+    }
+
+    return plots;
+}
+
+fn parseOwnerIdKind(kind_str: []const u8) ?shared.OwnerIdKind {
+    if (std.mem.eql(u8, kind_str, "none")) return .none;
+    if (std.mem.eql(u8, kind_str, "wallet")) return .wallet;
+    if (std.mem.eql(u8, kind_str, "ens")) return .ens;
+    if (std.mem.eql(u8, kind_str, "nft")) return .nft;
+    if (std.mem.eql(u8, kind_str, "custom")) return .custom;
+    return null;
+}
+
 const Client = struct {
     address: std.net.Address,
     state: shared.PlayerState,
-    last_heard_ns: i64, // Track when we last received a packet from this client
+    last_heard_ns: i64,
 };
 
 // Housekeeping configuration
@@ -20,6 +85,7 @@ const UdpEchoServer = struct {
     clients: std.AutoHashMap(u32, Client),
     allocator: std.mem.Allocator,
     world: shared.World,
+    plots: []shared.Plot,
     last_housekeeping_ns: i64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, bind_port: u16) !UdpEchoServer {
@@ -39,6 +105,8 @@ const UdpEchoServer = struct {
         // Load world data for collision detection
         const world = try shared.World.loadFromFile(allocator, "assets/worldoutput.json");
 
+        const plots = try loadPlots(allocator, "assets/plots.json");
+
         const now: i64 = @intCast(std.time.nanoTimestamp());
 
         return .{
@@ -46,12 +114,14 @@ const UdpEchoServer = struct {
             .clients = std.AutoHashMap(u32, Client).init(allocator),
             .allocator = allocator,
             .world = world,
+            .plots = plots,
             .last_housekeeping_ns = now,
         };
     }
 
     pub fn deinit(self: *UdpEchoServer) void {
         self.world.deinit(self.allocator);
+        self.allocator.free(self.plots);
         self.clients.deinit();
         posix.close(self.sock);
     }
@@ -113,6 +183,7 @@ const UdpEchoServer = struct {
                 .last_heard_ns = now,
             };
             std.debug.print("New player connected: session_id={d}, total_clients={d}\n", .{ session_id, self.clients.count() });
+            try self.sendPlots(&addr, ack_seq);
         }
 
         // Update last heard time and address
@@ -135,7 +206,7 @@ const UdpEchoServer = struct {
                 std.debug.print("Player removed, total_clients={d}\n", .{self.clients.count()});
                 try self.broadcastAllPlayers(ack_seq);
             },
-            .state_update, .all_players_state => {},
+            .state_update, .all_players_state, .plots_sync => {},
         }
     }
 
@@ -219,8 +290,6 @@ const UdpEchoServer = struct {
             .Right => new_pos.x += move_amount,
         }
 
-        // Clamp so the whole player stays inside the world bounds,
-        // matching the client-side prediction & reconciliation logic.
         const max_x = @max(0.0, self.world.width - PLAYER_SIZE);
         const max_y = @max(0.0, self.world.height - PLAYER_SIZE);
         new_pos.x = std.math.clamp(new_pos.x, 0.0, max_x);
@@ -269,6 +338,44 @@ const UdpEchoServer = struct {
         try packet.encode(buffer[0..]);
         const len = network.packet_header_size + network.AllPlayersPayload.size();
         _ = try posix.sendto(self.sock, buffer[0..len], 0, &addr.any, addr.getOsSockLen());
+    }
+
+    fn sendPlots(self: *UdpEchoServer, addr: *const std.net.Address, ack_seq: u32) !void {
+        var plots_payload: network.PlotsSyncPayload = undefined;
+        plots_payload.count = @min(@as(u8, @intCast(self.plots.len)), network.MAX_PLOTS);
+
+        for (0..plots_payload.count) |i| {
+            const plot = self.plots[i];
+            plots_payload.plots[i] = network.PlotData{
+                .id = plot.id,
+                .tile_x = plot.tile_x,
+                .tile_y = plot.tile_y,
+                .width_tiles = plot.width_tiles,
+                .height_tiles = plot.height_tiles,
+                .owner_kind = @intFromEnum(plot.owner.kind),
+                .owner_len = plot.owner.len,
+                .owner_value = plot.owner.value,
+            };
+        }
+
+        const payload = network.PacketPayload{ .plots_sync = plots_payload };
+        const payload_size = 1 + (@as(usize, plots_payload.count) * network.PlotData.size());
+        const header = network.PacketHeader{
+            .msg_type = .plots_sync,
+            .flags = .{ .reliable = true },
+            .session_id = 0,
+            .sequence = 0,
+            .ack = ack_seq,
+            .payload_len = @intCast(payload_size),
+        };
+
+        var buffer: [network.packet_header_size + network.PlotsSyncPayload.size()]u8 = undefined;
+        const packet = network.Packet{ .header = header, .payload = payload };
+        try packet.encode(buffer[0..]);
+        const len = network.packet_header_size + payload_size;
+        _ = try posix.sendto(self.sock, buffer[0..len], 0, &addr.any, addr.getOsSockLen());
+
+        std.debug.print("Sent {d} plots to client\n", .{plots_payload.count});
     }
 };
 

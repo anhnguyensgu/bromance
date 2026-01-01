@@ -114,13 +114,15 @@ pub const UdpClient = struct {
                 self.state.storeSnapshot(corrected);
             },
             .all_players_state => |all_players| {
-                // Delegate all logic to ClientGameState - uses double buffering internally
                 try self.state.handleAllPlayersUpdate(
                     all_players.players[0..all_players.count],
                     self.session_id,
                     packet.header.ack,
                     self.world,
                 );
+            },
+            .plots_sync => |plots_data| {
+                try self.state.handlePlotsUpdate(plots_data);
             },
             else => {},
         }

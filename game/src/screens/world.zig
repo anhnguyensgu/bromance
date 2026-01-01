@@ -19,6 +19,11 @@ const ui_menu = @import("../ui/menu.zig");
 const MenuItem = ui_menu.MenuItem;
 const Menu = ui_menu.Menu;
 
+const plot_ui = @import("../plot/plot_ui.zig");
+const PlotRenderStyle = plot_ui.PlotRenderStyle;
+const plot_decoration = @import("../plot/plot_decoration.zig");
+const Plot = @import("../plot/plot.zig").Plot;
+
 const Frames = shared.Frames;
 const LandscapeTile = shared.LandscapeTile;
 const SceneAction = @import("../core/scene_action.zig").SceneAction;
@@ -40,6 +45,7 @@ pub const WorldScreen = struct {
     tileset_texture: rl.Texture2D,
     townhall_texture: rl.Texture2D,
     lake_texture: rl.Texture2D,
+    fence_asset: shared.sheets.FenceAsset,
     grass: Frames,
 
     // UI
@@ -47,6 +53,15 @@ pub const WorldScreen = struct {
     menu_texture: rl.Texture2D,
     map_opened: bool = false,
     active_menu_item: ?usize = null,
+
+    // Plot system
+    plot_style: PlotRenderStyle,
+    show_plots: bool = true,
+    show_tile_grid: bool = false,
+    show_fences: bool = true,
+    show_sprite_debug: bool = false,
+    selected_plot_id: ?u64 = null,
+    nearby_plot_id: ?u64 = null,
 
     // Constants
     const MINIMAP_SIZE: i32 = 180;
@@ -79,6 +94,10 @@ pub const WorldScreen = struct {
         const lake_texture = try assets_cache.getTexture("assets/lakesmall.png");
         rl.setTextureFilter(lake_texture, .point);
 
+        const fence_texture = try assets_cache.getTexture("assets/farmrpg/objects/fencescopiar.png");
+        rl.setTextureFilter(fence_texture, .point);
+        const fence_asset = shared.sheets.FenceAsset.init(fence_texture);
+
         const grass = Frames{
             .SpringTiles = .{
                 .Grass = LandscapeTile.init(tileset_texture, 8.0, 0.0),
@@ -103,7 +122,7 @@ pub const WorldScreen = struct {
 
         // Network
         const game_state = try allocator.create(ClientGameState);
-        game_state.* = ClientGameState.init(allocator);
+        game_state.* = try ClientGameState.init(allocator);
 
         // We pass the heap pointer to UdpClient, so it stays valid
         const udp_client = try UdpClient.init(game_state, world, .{
@@ -124,9 +143,11 @@ pub const WorldScreen = struct {
             .tileset_texture = tileset_texture,
             .townhall_texture = townhall_texture,
             .lake_texture = lake_texture,
+            .fence_asset = fence_asset,
             .grass = grass,
             .top_menu = top_menu,
             .menu_texture = menu_texture,
+            .plot_style = PlotRenderStyle{},
         };
     }
 
@@ -185,6 +206,7 @@ pub const WorldScreen = struct {
 
         var move_cmd: ?MovementCommand = null;
 
+        // Handle keyboard input
         if (rl.isKeyDown(.w) or rl.isKeyDown(.up)) {
             move_cmd = .{ .direction = .Up, .speed = SPEED, .delta = dt };
         } else if (rl.isKeyDown(.s) or rl.isKeyDown(.down)) {
@@ -195,6 +217,39 @@ pub const WorldScreen = struct {
             move_cmd = .{ .direction = .Right, .speed = SPEED, .delta = dt };
         } else if (rl.isKeyPressed(.m)) {
             self.toggle_map();
+        } else if (rl.isKeyPressed(.p)) {
+            // Toggle plot visibility
+            self.show_plots = !self.show_plots;
+        } else if (rl.isKeyPressed(.g)) {
+            self.show_tile_grid = !self.show_tile_grid;
+        } else if (rl.isKeyPressed(.f)) {
+            self.show_fences = !self.show_fences;
+        } else if (rl.isKeyPressed(.n)) {
+            self.show_sprite_debug = !self.show_sprite_debug;
+        }
+
+        self.nearby_plot_id = findNearbyPlot(self.game_state.getPlots(), self.world, self.player);
+
+        if (rl.isKeyPressed(.e)) {
+            if (self.nearby_plot_id) |plot_id| {
+                self.selected_plot_id = plot_id;
+                if (self.game_state.getPlotById(plot_id)) |plot| {
+                    std.debug.print("Selected plot #{} at ({}, {}), size {}x{}\n", .{
+                        plot.id,
+                        plot.tile_x,
+                        plot.tile_y,
+                        plot.width_tiles,
+                        plot.height_tiles,
+                    });
+                    if (plot.owner.kind != .none) {
+                        std.debug.print("  Owner: {any}\n", .{plot.owner});
+                    } else {
+                        std.debug.print("  Unclaimed\n", .{});
+                    }
+                }
+            } else {
+                self.selected_plot_id = null;
+            }
         }
 
         if (move_cmd) |cmd| {
@@ -233,6 +288,25 @@ pub const WorldScreen = struct {
         rl.beginMode2D(render_camera);
 
         shared.drawGrassBackground(self.grass, self.world);
+
+        // Draw plots before buildings (so buildings appear on top)
+        if (self.show_plots) {
+            const fence = if (self.show_fences) self.fence_asset else null;
+            const plots = self.game_state.getPlots();
+            plot_ui.drawAllPlots(plots, self.world, self.plot_style, self.selected_plot_id, self.nearby_plot_id, fence);
+        }
+
+        if (self.show_tile_grid) {
+            plot_ui.drawTileGrid(self.world, rl.Color.init(255, 255, 255, 30));
+        }
+
+        if (self.show_fences) {
+            const plots = self.game_state.getPlots();
+            for (plots) |plot| {
+                plot_decoration.drawPlotFenceBorder(self.fence_asset, plot, self.world, self.show_sprite_debug);
+            }
+        }
+
         drawConstruction(self.townhall_texture, self.lake_texture, self.tileset_texture, self.world);
 
         // Draw Other Players
@@ -246,6 +320,14 @@ pub const WorldScreen = struct {
         }
 
         self.player.draw(self.assets) catch {};
+
+        // Draw plot info for selected plot
+        if (self.selected_plot_id) |plot_id| {
+            if (self.game_state.getPlotById(plot_id)) |plot| {
+                plot_ui.drawPlotInfo(plot.*, self.world, 16);
+            }
+        }
+
         rl.endMode2D();
 
         // Menu
@@ -281,10 +363,72 @@ pub const WorldScreen = struct {
         const pos_y = 10;
         rl.drawText(pos_text, pos_x, pos_y, 20, .dark_gray);
         rl.drawFPS(pos_x, pos_y + 24);
+
+        // Plot controls help text
+        const help_y = screen_height - 80;
+        rl.drawText("P: Plots | G: Grid | F: Fences | B: Debug | M: Map", 10, help_y, 16, rl.Color.init(200, 200, 200, 255));
+
+        if (self.nearby_plot_id) |plot_id| {
+            var nearby_buf: [64]u8 = undefined;
+            const nearby_text = std.fmt.bufPrintZ(&nearby_buf, "Press E to select Plot #{}", .{plot_id}) catch "";
+            rl.drawText(nearby_text, 10, help_y + 20, 20, rl.Color.init(255, 255, 0, 255));
+        }
+
+        if (self.show_sprite_debug) {
+            self.fence_asset.drawDebug();
+        }
     }
 };
 
 // Helper Functions (Copied from main.zig)
+
+fn findNearbyPlot(plots: []const Plot, world: shared.World, player: Character) ?u64 {
+    const player_rect = rl.Rectangle{
+        .x = player.pos.x,
+        .y = player.pos.y,
+        .width = player.size.x,
+        .height = player.size.y,
+    };
+
+    const player_center_x = player.pos.x + player.size.x / 2.0;
+    const player_center_y = player.pos.y + player.size.y / 2.0;
+
+    var closest_plot_id: ?u64 = null;
+    var closest_distance: f32 = std.math.floatMax(f32);
+
+    const tile_w = world.width / @as(f32, @floatFromInt(world.tiles_x));
+    const tile_h = world.height / @as(f32, @floatFromInt(world.tiles_y));
+
+    for (plots) |plot| {
+        const plot_x = world.tileToWorldX(plot.tile_x);
+        const plot_y = world.tileToWorldY(plot.tile_y);
+        const plot_w = @as(f32, @floatFromInt(plot.width_tiles)) * tile_w;
+        const plot_h = @as(f32, @floatFromInt(plot.height_tiles)) * tile_h;
+
+        const plot_rect = rl.Rectangle{
+            .x = plot_x,
+            .y = plot_y,
+            .width = plot_w,
+            .height = plot_h,
+        };
+
+        if (rl.checkCollisionRecs(player_rect, plot_rect)) {
+            const plot_center_x = plot_x + plot_w / 2.0;
+            const plot_center_y = plot_y + plot_h / 2.0;
+
+            const dx = player_center_x - plot_center_x;
+            const dy = player_center_y - plot_center_y;
+            const distance = @sqrt(dx * dx + dy * dy);
+
+            if (distance < closest_distance) {
+                closest_distance = distance;
+                closest_plot_id = plot.id;
+            }
+        }
+    }
+
+    return closest_plot_id;
+}
 
 fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
     const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;

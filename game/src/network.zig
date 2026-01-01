@@ -15,6 +15,7 @@ pub const PacketType = enum(u8) {
     state_update = 3,
     all_players_state = 4,
     leave = 5,
+    plots_sync = 6,
 };
 
 pub const StatePayload = struct {
@@ -109,7 +110,7 @@ pub const AllPlayersPayload = struct {
 };
 
 pub const LeavePayload = struct {
-    reason: u8, // 0 = normal disconnect, 1 = timeout, etc.
+    reason: u8,
 
     pub fn size() usize {
         return 1;
@@ -127,12 +128,93 @@ pub const LeavePayload = struct {
     }
 };
 
+pub const MAX_PLOTS: usize = 32;
+
+pub const PlotData = struct {
+    id: u64,
+    tile_x: i32,
+    tile_y: i32,
+    width_tiles: i32,
+    height_tiles: i32,
+    owner_kind: u8,
+    owner_len: u8,
+    owner_value: [64]u8,
+
+    pub fn size() usize {
+        return 8 + 4 + 4 + 4 + 4 + 1 + 1 + 64;
+    }
+
+    pub fn encode(self: PlotData, dest: []u8) ![]u8 {
+        if (dest.len < size()) return error.BufferTooSmall;
+        const slice = dest[0..size()];
+        std.mem.writeInt(u64, slice[0..8], self.id, wire_endian);
+        std.mem.writeInt(i32, slice[8..12], self.tile_x, wire_endian);
+        std.mem.writeInt(i32, slice[12..16], self.tile_y, wire_endian);
+        std.mem.writeInt(i32, slice[16..20], self.width_tiles, wire_endian);
+        std.mem.writeInt(i32, slice[20..24], self.height_tiles, wire_endian);
+        slice[24] = self.owner_kind;
+        slice[25] = self.owner_len;
+        @memcpy(slice[26..90], &self.owner_value);
+        return slice;
+    }
+
+    pub fn decode(buf: []const u8) !PlotData {
+        if (buf.len < size()) return error.BufferTooSmall;
+        var owner_value: [64]u8 = undefined;
+        @memcpy(&owner_value, buf[26..90]);
+        return .{
+            .id = std.mem.readInt(u64, buf[0..8], wire_endian),
+            .tile_x = std.mem.readInt(i32, buf[8..12], wire_endian),
+            .tile_y = std.mem.readInt(i32, buf[12..16], wire_endian),
+            .width_tiles = std.mem.readInt(i32, buf[16..20], wire_endian),
+            .height_tiles = std.mem.readInt(i32, buf[20..24], wire_endian),
+            .owner_kind = buf[24],
+            .owner_len = buf[25],
+            .owner_value = owner_value,
+        };
+    }
+};
+
+pub const PlotsSyncPayload = struct {
+    count: u8,
+    plots: [MAX_PLOTS]PlotData,
+
+    pub fn size() usize {
+        return 1 + (MAX_PLOTS * PlotData.size());
+    }
+
+    pub fn encode(self: PlotsSyncPayload, dest: []u8) ![]u8 {
+        const total_size = 1 + (@as(usize, self.count) * PlotData.size());
+        if (dest.len < total_size) return error.BufferTooSmall;
+        dest[0] = self.count;
+        var offset: usize = 1;
+        for (0..self.count) |i| {
+            _ = try self.plots[i].encode(dest[offset..]);
+            offset += PlotData.size();
+        }
+        return dest[0..total_size];
+    }
+
+    pub fn decode(buf: []const u8) !PlotsSyncPayload {
+        if (buf.len < 1) return error.BufferTooSmall;
+        var result: PlotsSyncPayload = undefined;
+        result.count = buf[0];
+        var offset: usize = 1;
+        for (0..result.count) |i| {
+            result.plots[i] = try PlotData.decode(buf[offset..]);
+            offset += PlotData.size();
+        }
+        return result;
+    }
+};
+
 pub const PacketPayload = union(PacketType) {
     ping: PingPayload,
     move: MovePayload,
     state_update: StatePayload,
     all_players_state: AllPlayersPayload,
     leave: LeavePayload,
+    plots_sync: PlotsSyncPayload,
     const Self = @This();
 
     pub fn decodePayload(header: *const PacketHeader, payload: []const u8) !Self {
@@ -142,6 +224,7 @@ pub const PacketPayload = union(PacketType) {
             .state_update => return .{ .state_update = try decodeGenericPayload(StatePayload, payload) },
             .all_players_state => return .{ .all_players_state = try decodeGenericPayload(AllPlayersPayload, payload) },
             .leave => return .{ .leave = try decodeGenericPayload(LeavePayload, payload) },
+            .plots_sync => return .{ .plots_sync = try decodeGenericPayload(PlotsSyncPayload, payload) },
         }
     }
 
@@ -314,6 +397,11 @@ pub const Packet = struct {
             .leave => |payload_leave| {
                 var tmp: [LeavePayload.size()]u8 = undefined;
                 const encoded = try payload_leave.encode(&tmp);
+                std.mem.copyForwards(u8, body_slice, encoded);
+            },
+            .plots_sync => |payload_plots| {
+                var tmp: [PlotsSyncPayload.size()]u8 = undefined;
+                const encoded = try payload_plots.encode(&tmp);
                 std.mem.copyForwards(u8, body_slice, encoded);
             },
         }
