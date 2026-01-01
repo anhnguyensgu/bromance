@@ -28,17 +28,14 @@ pub const OtherPlayerState = struct {
 pub const ClientGameState = struct {
     mutex: std.Thread.Mutex = .{},
 
-    // Local player state
     snapshots: [MAX_SNAPSHOTS]Snapshot = undefined,
     snapshot_count: usize = 0,
 
-    // Other players state - double buffered for lock-free reading
-    // Network thread writes to back buffer, then swaps
-    // Render thread reads from front buffer
     other_players_buffers: [2]std.AutoHashMap(u32, OtherPlayerState),
     active_buffer: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
 
-    // Input state
+    plots: std.ArrayList(shared.Plot),
+
     pending_moves: [MAX_PENDING_MOVES]PendingMove = undefined,
     pending_count: usize = 0,
     sequence: u32 = 0,
@@ -46,8 +43,7 @@ pub const ClientGameState = struct {
 
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) ClientGameState {
-        // Generate random session ID
+    pub fn init(allocator: std.mem.Allocator) !ClientGameState {
         var prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
         const random_session_id = prng.random().int(u32);
 
@@ -56,6 +52,7 @@ pub const ClientGameState = struct {
                 std.AutoHashMap(u32, OtherPlayerState).init(allocator),
                 std.AutoHashMap(u32, OtherPlayerState).init(allocator),
             },
+            .plots = try std.ArrayList(shared.Plot).initCapacity(allocator, 8),
             .allocator = allocator,
             .session_id = random_session_id,
         };
@@ -64,6 +61,47 @@ pub const ClientGameState = struct {
     pub fn deinit(self: *ClientGameState) void {
         self.other_players_buffers[0].deinit();
         self.other_players_buffers[1].deinit();
+        self.plots.deinit(self.allocator);
+    }
+
+    pub fn handlePlotsUpdate(self: *ClientGameState, plots_data: network.PlotsSyncPayload) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        try self.plots.resize(self.allocator, 0);
+
+        for (0..plots_data.count) |i| {
+            const plot_data = plots_data.plots[i];
+            const owner = shared.OwnerId{
+                .kind = @enumFromInt(plot_data.owner_kind),
+                .len = plot_data.owner_len,
+                .value = plot_data.owner_value,
+            };
+
+            try self.plots.append(self.allocator, shared.Plot{
+                .id = plot_data.id,
+                .tile_x = plot_data.tile_x,
+                .tile_y = plot_data.tile_y,
+                .width_tiles = plot_data.width_tiles,
+                .height_tiles = plot_data.height_tiles,
+                .owner = owner,
+            });
+        }
+
+        std.debug.print("Received {d} plots from server\n", .{plots_data.count});
+    }
+
+    pub fn getPlots(self: *const ClientGameState) []const shared.Plot {
+        return self.plots.items;
+    }
+
+    pub fn getPlotById(self: *const ClientGameState, id: u64) ?*const shared.Plot {
+        for (self.plots.items) |*plot| {
+            if (plot.id == id) {
+                return plot;
+            }
+        }
+        return null;
     }
 
     // --- Thread-Safe Methods ---
@@ -270,7 +308,7 @@ pub const ClientGameState = struct {
             new_pos.y = std.math.clamp(new_pos.y, 0.0, max_y);
 
             // Collision
-            const collision = world.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, cmd.direction);
+            const collision = world.checkCollisionAll(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, cmd.direction);
             if (!collision) {
                 pos = new_pos;
             }

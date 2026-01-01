@@ -19,6 +19,11 @@ pub const editor_map = @import("map/editor_map.zig");
 pub const ghost_layer = @import("ui/ghost_layer.zig");
 pub const placement = @import("ui/placement.zig");
 
+pub const plot_mod = @import("plot/plot.zig");
+pub const Plot = plot_mod.Plot;
+pub const OwnerId = plot_mod.OwnerId;
+pub const OwnerIdKind = plot_mod.OwnerIdKind;
+
 pub const PlayerState = struct {
     x: f32,
     y: f32,
@@ -48,6 +53,7 @@ pub const BuildingType = enum {
     Farm,
     Lake,
     Road,
+    Tile,
 };
 
 // Building instance on the map - self-contained with all properties
@@ -77,6 +83,7 @@ pub const World = struct {
     tile_grid_x: i32 = 0,
     tile_grid_y: i32 = 0,
     buildings: []Building,
+    plots: []Plot = &[_]Plot{},
 
     pub fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !World {
         // Read the entire file
@@ -178,6 +185,46 @@ pub const World = struct {
             }
         }
 
+        // Optional: parse "plots" array if present
+        var plots_slice: []Plot = &[_]Plot{};
+        if (root.get("plots")) |plots_val| {
+            const plots_array = plots_val.array;
+            plots_slice = try allocator.alloc(Plot, plots_array.items.len);
+            errdefer allocator.free(plots_slice);
+
+            for (plots_array.items, 0..) |plot_obj, i| {
+                const obj = plot_obj.object;
+                const id = @as(u64, @intCast(obj.get("id").?.integer));
+                const tile_x = @as(i32, @intCast(obj.get("tile_x").?.integer));
+                const tile_y = @as(i32, @intCast(obj.get("tile_y").?.integer));
+                const width_tiles = @as(i32, @intCast(obj.get("width_tiles").?.integer));
+                const height_tiles = @as(i32, @intCast(obj.get("height_tiles").?.integer));
+
+                // Parse optional owner
+                var owner = OwnerId.none();
+                if (obj.get("owner")) |owner_obj| {
+                    const owner_data = owner_obj.object;
+                    const kind_str = owner_data.get("kind").?.string;
+                    const kind: OwnerIdKind = parseOwnerIdKind(kind_str) orelse .none;
+
+                    if (owner_data.get("value")) |value_str| {
+                        owner = OwnerId.init(kind, value_str.string);
+                    } else {
+                        owner = OwnerId{ .kind = kind };
+                    }
+                }
+
+                plots_slice[i] = Plot{
+                    .id = id,
+                    .tile_x = tile_x,
+                    .tile_y = tile_y,
+                    .width_tiles = width_tiles,
+                    .height_tiles = height_tiles,
+                    .owner = owner,
+                };
+            }
+        }
+
         // Arena allocator is destroyed here, freeing buffer and parsed JSON
         return World{
             .buildings = buildings[0..],
@@ -188,12 +235,14 @@ pub const World = struct {
             .tile_grid_x = tile_grid_x,
             .tile_grid_y = tile_grid_y,
             .tiles = tiles_slice,
+            .plots = plots_slice,
         };
     }
 
     pub fn deinit(self: *World, allocator: std.mem.Allocator) void {
         allocator.free(self.buildings);
         if (self.tiles.len > 0) allocator.free(self.tiles);
+        if (self.plots.len > 0) allocator.free(self.plots);
     }
 
     pub fn getTileAtPosition(self: World, x: f32, y: f32) TerrainType {
@@ -229,6 +278,9 @@ pub const World = struct {
         return terrain == .Grass or terrain == .Road;
     }
 
+    // Terrain collision uses direction to only sample the leading edge of movement
+    // (e.g. moving up checks top corners). This avoids "sticky" collisions when
+    // sliding along edges. Building collision is full AABB, so it doesn't need direction.
     pub fn checkCollision(self: World, x: f32, y: f32, w: f32, h: f32, direction: command.MoveDirection) bool {
         // Define hitbox corners
         const left = x;
@@ -260,6 +312,11 @@ pub const World = struct {
             },
         }
         return false;
+    }
+
+    // Unified collision: terrain (directional) + buildings (AABB).
+    pub fn checkCollisionAll(self: World, x: f32, y: f32, w: f32, h: f32, direction: command.MoveDirection) bool {
+        return self.checkCollision(x, y, w, h, direction) or self.checkBuildingCollision(x, y, w, h);
     }
 
     pub fn checkBuildingCollision(self: World, x: f32, y: f32, w: f32, h: f32) bool {
@@ -299,6 +356,7 @@ pub const World = struct {
 
         return false;
     }
+
     pub fn tileToWorldX(self: World, tile_x: i32) f32 {
         const tile_w = self.width / @as(f32, @floatFromInt(self.tiles_x));
         return @as(f32, @floatFromInt(tile_x)) * tile_w;
@@ -307,6 +365,44 @@ pub const World = struct {
     pub fn tileToWorldY(self: World, tile_y: i32) f32 {
         const tile_h = self.height / @as(f32, @floatFromInt(self.tiles_y));
         return @as(f32, @floatFromInt(tile_y)) * tile_h;
+    }
+
+    /// Convert world position to tile coordinates
+    pub fn worldToTileX(self: World, x: f32) i32 {
+        const clamped_x = std.math.clamp(x, 0, self.width);
+        return @intFromFloat((clamped_x / self.width) * @as(f32, @floatFromInt(self.tiles_x)));
+    }
+
+    pub fn worldToTileY(self: World, y: f32) i32 {
+        const clamped_y = std.math.clamp(y, 0, self.height);
+        return @intFromFloat((clamped_y / self.height) * @as(f32, @floatFromInt(self.tiles_y)));
+    }
+
+    /// Find plot at the given tile coordinates
+    pub fn getPlotAtTile(self: World, tile_x: i32, tile_y: i32) ?*const Plot {
+        for (self.plots) |*plot| {
+            if (plot.containsTile(tile_x, tile_y)) {
+                return plot;
+            }
+        }
+        return null;
+    }
+
+    /// Find plot at the given world position
+    pub fn getPlotAtPosition(self: World, x: f32, y: f32) ?*const Plot {
+        const tx = self.worldToTileX(x);
+        const ty = self.worldToTileY(y);
+        return self.getPlotAtTile(tx, ty);
+    }
+
+    /// Find plot by ID
+    pub fn getPlotById(self: World, id: u64) ?*const Plot {
+        for (self.plots) |*plot| {
+            if (plot.id == id) {
+                return plot;
+            }
+        }
+        return null;
     }
 };
 
@@ -445,6 +541,16 @@ fn parseBuildingType(type_str: []const u8) ?BuildingType {
     if (std.mem.eql(u8, type_str, "Farm")) return .Farm;
     if (std.mem.eql(u8, type_str, "Lake")) return .Lake;
     if (std.mem.eql(u8, type_str, "Road")) return .Road;
+    if (std.mem.eql(u8, type_str, "Tile")) return .Tile;
+    return null;
+}
+
+fn parseOwnerIdKind(kind_str: []const u8) ?OwnerIdKind {
+    if (std.mem.eql(u8, kind_str, "none")) return .none;
+    if (std.mem.eql(u8, kind_str, "wallet")) return .wallet;
+    if (std.mem.eql(u8, kind_str, "ens")) return .ens;
+    if (std.mem.eql(u8, kind_str, "nft")) return .nft;
+    if (std.mem.eql(u8, kind_str, "custom")) return .custom;
     return null;
 }
 

@@ -114,13 +114,15 @@ pub const UdpClient = struct {
                 self.state.storeSnapshot(corrected);
             },
             .all_players_state => |all_players| {
-                // Delegate all logic to ClientGameState - uses double buffering internally
                 try self.state.handleAllPlayersUpdate(
                     all_players.players[0..all_players.count],
                     self.session_id,
                     packet.header.ack,
                     self.world,
                 );
+            },
+            .plots_sync => |plots_data| {
+                try self.state.handlePlotsUpdate(plots_data);
             },
             else => {},
         }
@@ -177,7 +179,7 @@ pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand, world: shared.
     new_pos.y = std.math.clamp(new_pos.y, 0.0, max_y);
 
     // Check collision at new position
-    const collision = world.checkCollision(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
+    const collision = world.checkCollisionAll(new_pos.x, new_pos.y, PLAYER_SIZE, PLAYER_SIZE, move.direction);
 
     if (!collision) {
         pos.* = new_pos;

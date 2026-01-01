@@ -16,6 +16,8 @@ pub const MenuLayout = struct {
 pub const MenuItem = struct {
     label: [:0]const u8,
     action: *const fn () void,
+    action_ctx: ?*const fn (ctx: ?*anyopaque) void = null,
+    ctx: ?*anyopaque = null,
     col_span: usize = 1,
     custom_draw: ?*const fn (item: *const MenuItem, rect: rl.Rectangle, active: bool, hovered: bool) void = null,
     data: ?*const anyopaque = null,
@@ -76,7 +78,7 @@ pub const Menu = struct {
         if (cols < 1) cols = 1;
 
         const menu_width: f32 = (2.0 * side_padding) + (@as(f32, @floatFromInt(cols)) * (tile_size + spacing)) - spacing;
-        const ratio = menu_width / 80.0;
+        const ratio = menu_width / 83.0;
 
         // First pass: Calculate total height needed
         var current_col: usize = 0;
@@ -106,6 +108,7 @@ pub const Menu = struct {
         const total_rows = if (current_col == 0 and current_row > 0) current_row else current_row + 1;
         const total_height = top_padding + (@as(f32, @floatFromInt(total_rows)) * (tile_size + spacing)) + spacing;
         const total_height_f = @max(total_height, 100 * ratio);
+        const height_ratio = total_height_f / 172.0;
 
         if (rl.isKeyPressed(.b)) {
             self.toggle();
@@ -115,13 +118,29 @@ pub const Menu = struct {
             .Menu => |sheet| {
                 const rect = sheet.get(.Background);
                 // Adjust background height to fit content
-                sheets.drawSpriteTo(sheet.texture2D, rect, .{ .x = pos_x, .y = 0, .width = menu_width, .height = total_height_f });
+                sheets.drawSpriteTo(sheet.texture2D, rect, .{ .x = 0, .y = 0, .width = 300, .height = 300 });
             },
             else => {},
         }
 
         const mouse = rl.getMousePosition();
-        const clicked = rl.isMouseButtonPressed(rl.MouseButton.left);
+        const clicked = rl.isMouseButtonPressed(.left);
+        // Close button overlay (top-right of menu)
+        // const close_size: f32 = 7 * ratio;
+        // const close_pad_: f32 = 3.0 * ratio;
+        const close_rect = rl.Rectangle{
+            .x = pos_x + menu_width - 13.0 * ratio,
+            .y = 4.0 * height_ratio,
+            .width = 7 * ratio,
+            .height = 7 * height_ratio,
+        };
+        rl.drawRectangleLinesEx(close_rect, 1, rl.Color.red);
+        const close_hovered = rl.checkCollisionPointRec(mouse, close_rect);
+        rl.setMouseCursor(if (close_hovered) .pointing_hand else .default);
+        if (close_hovered and clicked) {
+            self.toggle();
+            rl.setMouseCursor(.default);
+        }
 
         current_col = 0;
         current_row = 0;
@@ -174,11 +193,19 @@ pub const Menu = struct {
                             ptr.* = null;
                         } else {
                             ptr.* = idx;
-                            item.action();
+                            if (item.action_ctx) |handler| {
+                                handler(item.ctx);
+                            } else {
+                                item.action();
+                            }
                         }
                     } else {
                         ptr.* = idx;
-                        item.action();
+                        if (item.action_ctx) |handler| {
+                            handler(item.ctx);
+                        } else {
+                            item.action();
+                        }
                     }
                 }
             }
@@ -188,7 +215,11 @@ pub const Menu = struct {
     }
 
     /// Draw menu in fixed sidebar mode (always visible, no toggle) with scroll support
-    pub fn drawAsSidebar(self: *Self, sidebar_width: f32, screen_height: i32, menu_items: []const MenuItem, active_item: ?*?usize) void {
+    pub fn drawAsSidebar(self: *Self, sidebar_width: f32, screen_height: i32, menu_items: []const MenuItem, active_item: ?*?usize, title: [:0]const u8) void {
+        if (rl.isKeyPressed(.b)) {
+            self.toggle();
+        }
+        if (!self.is_open) return;
         const spacing = 8.0;
         const tile_size: f32 = 48.0;
         const side_padding: f32 = 15.0;
@@ -208,7 +239,7 @@ pub const Menu = struct {
         rl.drawLine(@intFromFloat(sidebar_width), 0, @intFromFloat(sidebar_width), screen_height, rl.Color{ .r = 60, .g = 64, .b = 72, .a = 255 });
 
         // Draw title
-        rl.drawText("TOOLS", @intFromFloat(side_padding), 20, 24, rl.Color.white);
+        rl.drawText(title, @intFromFloat(side_padding), 20, 24, rl.Color.white);
         rl.drawLine(@intFromFloat(side_padding), 50, @intFromFloat(sidebar_width - side_padding), 50, rl.Color{ .r = 80, .g = 84, .b = 92, .a = 255 });
 
         const mouse = rl.getMousePosition();
@@ -310,10 +341,5 @@ pub const Menu = struct {
                 rl.Color{ .r = 100, .g = 104, .b = 112, .a = 255 },
             );
         }
-
-        // Draw help text at bottom
-        const help_y = screen_height - 60;
-        rl.drawText("Ctrl+S: Save", @intFromFloat(side_padding), help_y, 14, rl.Color{ .r = 150, .g = 150, .b = 150, .a = 255 });
-        rl.drawText("ESC: Cancel", @intFromFloat(side_padding), help_y + 18, 14, rl.Color{ .r = 150, .g = 150, .b = 150, .a = 255 });
     }
 };
