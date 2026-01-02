@@ -96,7 +96,7 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the zig-client demo");
     run_step.dependOn(&run_cmd.step);
 
-    // Server executable (pure Zig, imports shared)
+    // Server executable (imports shared, links sqlite3)
     const server_mod = b.addModule("zig_server_root", .{
         .root_source_file = b.path("src/server_main.zig"),
         .target = target,
@@ -104,6 +104,8 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "shared", .module = shared_mod }},
     });
     const server_exe = b.addExecutable(.{ .name = "zig-server", .root_module = server_mod });
+    server_exe.linkSystemLibrary("sqlite3");
+    server_exe.linkLibC();
     b.installArtifact(server_exe);
     const run_server = b.addRunArtifact(server_exe);
     run_server.step.dependOn(b.getInstallStep());
@@ -123,6 +125,31 @@ pub fn build(b: *std.Build) void {
     const run_inspector = b.addRunArtifact(inspector_exe);
     run_inspector.step.dependOn(b.getInstallStep());
     b.step("run-inspector", "Run the tile inspector app").dependOn(&run_inspector.step);
+
+    // Migration CLI tool
+    const migrate_mod = b.addModule("zig_migrate_root", .{
+        .root_source_file = b.path("bin/migrate.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // Add db/migrations.zig as a module dependency
+    const migrations_mod = b.addModule("db/migrations", .{
+        .root_source_file = b.path("src/db/migrations.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    migrate_mod.addImport("db/migrations.zig", migrations_mod);
+
+    const migrate_exe = b.addExecutable(.{ .name = "zig-migrate", .root_module = migrate_mod });
+    migrate_exe.linkSystemLibrary("sqlite3");
+    migrate_exe.linkLibC();
+    b.installArtifact(migrate_exe);
+    const run_migrate = b.addRunArtifact(migrate_exe);
+    run_migrate.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_migrate.addArgs(args);
+    }
+    b.step("migrate", "Run database migrations").dependOn(&run_migrate.step);
 
     const exe_tests = b.addTest(.{
         .root_module = root_module,

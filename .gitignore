@@ -15,6 +15,11 @@ zig-out/
 **/keys/
 **/data.db-wal
 
+# SQLite database files
+**/data/*.sqlite
+**/data/*.sqlite-wal
+**/data/*.sqlite-shm
+
 # Compiled objects and libraries
 *.o
 *.obj
