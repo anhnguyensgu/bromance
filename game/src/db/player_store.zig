@@ -34,6 +34,7 @@ pub const PlayerStore = struct {
 
     const Self = @This();
     const FLUSH_INTERVAL_MS: u64 = 5000;
+    const MAX_BATCH: usize = 64;
 
     /// Initialize PlayerStore with separate connections per thread.
     /// Database must already be migrated via migrations.zig CLI tool.
@@ -174,98 +175,108 @@ pub const PlayerStore = struct {
     fn flushPendingSync(self: *Self) void {
         // Load indices (acquire to see producer's writes)
         const write_idx = self.write_index.load(.acquire);
-        var read_idx = self.read_index.load(.acquire);
+        const read_idx = self.read_index.load(.acquire);
 
         // Check if queue is empty
         if (read_idx == write_idx) {
             return; // Nothing to persist
         }
 
-        // Calculate how many entries to read
-        const count = if (write_idx > read_idx)
+        // Calculate how many entries are available
+        const available = if (write_idx > read_idx)
             write_idx - read_idx
         else
             (MAX_PENDING - read_idx) + write_idx;
 
-        // Copy entries to local buffer (don't hold shared state during DB ops)
-        var entries: [MAX_PENDING]PersistEntry = undefined;
-        var copied: usize = 0;
-        while (copied < count and read_idx != write_idx) {
-            entries[copied] = self.pending_queue[read_idx];
-            copied += 1;
-            read_idx = (read_idx + 1) % MAX_PENDING;
-        }
+        if (available == 0) return;
 
-        // Publish read completion (release to make space available)
-        self.read_index.store(read_idx, .release);
+        const start_read_idx = read_idx;
+        var processed: usize = 0;
 
-        if (copied == 0) return;
+        while (processed < available) {
+            const batch_count = @min(MAX_BATCH, available - processed);
 
-        // Build batch upsert SQL dynamically
-        var sql_buf: [8192]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&sql_buf);
-        const writer = fbs.writer();
+            // Build batch upsert SQL dynamically (growable buffer to avoid truncation)
+            var sql_builder: std.io.Writer.Allocating = .init(std.heap.page_allocator);
+            defer sql_builder.deinit();
+            const writer = &sql_builder.writer;
 
-        const now = std.time.timestamp();
+            const now = std.time.timestamp();
 
-        writer.writeAll(
-            \\INSERT INTO player_state (session_id, x, y, updated_at) VALUES 
-            \\
-        ) catch {
-            std.debug.print("Failed to build batch upsert SQL\n", .{});
-            return;
-        };
+            writer.writeAll(
+                \\INSERT INTO player_state (session_id, x, y, updated_at) VALUES 
+                \\
+            ) catch {
+                std.debug.print("Failed to build batch upsert SQL\n", .{});
+                return;
+            };
 
-        for (0..copied) |i| {
-            const entry = entries[i];
-            if (i > 0) {
-                writer.writeAll(",\n") catch break;
+            for (0..batch_count) |i| {
+                const idx = (start_read_idx + processed + i) % MAX_PENDING;
+                const entry = self.pending_queue[idx];
+                if (i > 0) {
+                    writer.writeAll(",\n") catch {
+                        std.debug.print("Failed to build batch upsert SQL\n", .{});
+                        return;
+                    };
+                }
+                writer.print("({d}, {d:.6}, {d:.6}, {d})", .{
+                    entry.session_id,
+                    entry.state.x,
+                    entry.state.y,
+                    now,
+                }) catch {
+                    std.debug.print("Failed to build batch upsert SQL\n", .{});
+                    return;
+                };
             }
-            writer.print("({d}, {d:.6}, {d:.6}, {d})", .{
-                entry.session_id,
-                entry.state.x,
-                entry.state.y,
-                now,
-            }) catch break;
+
+            writer.writeAll(
+                \\ ON CONFLICT(session_id) DO UPDATE SET
+                \\  x = excluded.x,
+                \\  y = excluded.y,
+                \\  updated_at = excluded.updated_at;
+            ) catch {
+                std.debug.print("Failed to finalize batch upsert SQL\n", .{});
+                return;
+            };
+
+            // Null-terminate for sqlite3_exec
+            writer.writeByte(0) catch {
+                std.debug.print("Failed to finalize batch upsert SQL\n", .{});
+                return;
+            };
+            const sql = sql_builder.writer.buffered();
+            const sql_z = sql[0 .. sql.len - 1 :0];
+
+            // No mutex needed! persist_db is only used by persist thread
+            // Execute batch upsert in a transaction
+            if (c.sqlite3_exec(self.persist_db, "BEGIN IMMEDIATE;", null, null, null) != c.SQLITE_OK) {
+                std.debug.print("Failed to begin transaction for flush\n", .{});
+                return;
+            }
+
+            if (c.sqlite3_exec(self.persist_db, sql_z.ptr, null, null, null) != c.SQLITE_OK) {
+                const err_msg = c.sqlite3_errmsg(self.persist_db);
+                std.debug.print("Failed to execute batch upsert: {s}\n", .{err_msg});
+                _ = c.sqlite3_exec(self.persist_db, "ROLLBACK;", null, null, null);
+                return;
+            }
+
+            if (c.sqlite3_exec(self.persist_db, "COMMIT;", null, null, null) != c.SQLITE_OK) {
+                std.debug.print("Failed to commit flush transaction\n", .{});
+                _ = c.sqlite3_exec(self.persist_db, "ROLLBACK;", null, null, null);
+                return;
+            }
+
+            processed += batch_count;
+            const new_read_idx = (start_read_idx + processed) % MAX_PENDING;
+            self.read_index.store(new_read_idx, .release);
+
+            std.debug.print(
+                "Persisted {d} player state(s) to database (lock-free + per-thread connections)\n",
+                .{batch_count},
+            );
         }
-
-        writer.writeAll(
-            \\ ON CONFLICT(session_id) DO UPDATE SET
-            \\  x = excluded.x,
-            \\  y = excluded.y,
-            \\  updated_at = excluded.updated_at;
-        ) catch {
-            std.debug.print("Failed to finalize batch upsert SQL\n", .{});
-            return;
-        };
-
-        const sql = fbs.getWritten();
-
-        // Need null-terminated string for sqlite3_exec
-        var sql_z: [8192:0]u8 = undefined;
-        @memcpy(sql_z[0..sql.len], sql);
-        sql_z[sql.len] = 0;
-
-        // No mutex needed! persist_db is only used by persist thread
-        // Execute batch upsert in a transaction
-        if (c.sqlite3_exec(self.persist_db, "BEGIN IMMEDIATE;", null, null, null) != c.SQLITE_OK) {
-            std.debug.print("Failed to begin transaction for flush\n", .{});
-            return;
-        }
-
-        if (c.sqlite3_exec(self.persist_db, sql_z[0..sql.len :0].ptr, null, null, null) != c.SQLITE_OK) {
-            const err_msg = c.sqlite3_errmsg(self.persist_db);
-            std.debug.print("Failed to execute batch upsert: {s}\n", .{err_msg});
-            _ = c.sqlite3_exec(self.persist_db, "ROLLBACK;", null, null, null);
-            return;
-        }
-
-        if (c.sqlite3_exec(self.persist_db, "COMMIT;", null, null, null) != c.SQLITE_OK) {
-            std.debug.print("Failed to commit flush transaction\n", .{});
-            _ = c.sqlite3_exec(self.persist_db, "ROLLBACK;", null, null, null);
-            return;
-        }
-
-        std.debug.print("Persisted {d} player state(s) to database (lock-free + per-thread connections)\n", .{copied});
     }
 };
