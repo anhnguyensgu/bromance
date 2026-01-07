@@ -23,10 +23,15 @@ const plot_ui = @import("../plot/plot_ui.zig");
 const PlotRenderStyle = plot_ui.PlotRenderStyle;
 const plot_decoration = @import("../plot/plot_decoration.zig");
 const Plot = @import("../plot/plot.zig").Plot;
+const widgets = @import("../ui/widgets.zig");
 
 const Frames = shared.Frames;
 const LandscapeTile = shared.LandscapeTile;
 const SceneAction = @import("../core/scene_action.zig").SceneAction;
+const ModalMenu = ui_menu.ModalMenu;
+const ModalMenuAction = ui_menu.ModalMenuAction;
+
+const MenuPage = enum { Home, Plot, Visit, Marketplace };
 
 pub const WorldScreen = struct {
     allocator: std.mem.Allocator,
@@ -53,6 +58,9 @@ pub const WorldScreen = struct {
     menu_texture: rl.Texture2D,
     map_opened: bool = false,
     active_menu_item: ?usize = null,
+    modal_menu: ModalMenu,
+    modal_active: ?usize = null,
+    modal_page: MenuPage = .Home,
 
     // Plot system
     plot_style: PlotRenderStyle,
@@ -147,6 +155,7 @@ pub const WorldScreen = struct {
             .grass = grass,
             .top_menu = top_menu,
             .menu_texture = menu_texture,
+            .modal_menu = ModalMenu.init(.{}),
             .plot_style = PlotRenderStyle{},
         };
     }
@@ -202,59 +211,68 @@ pub const WorldScreen = struct {
     }
 
     pub fn update(self: *WorldScreen, dt: f32, ctx: anytype) SceneAction {
-        _ = ctx; // potentially unused
-
+        const screen_width = ctx.screen_width;
+        const mouse = rl.getMousePosition();
         var move_cmd: ?MovementCommand = null;
 
-        // Handle keyboard input
-        if (rl.isKeyDown(.w) or rl.isKeyDown(.up)) {
-            move_cmd = .{ .direction = .Up, .speed = SPEED, .delta = dt };
-        } else if (rl.isKeyDown(.s) or rl.isKeyDown(.down)) {
-            move_cmd = .{ .direction = .Down, .speed = SPEED, .delta = dt };
-        } else if (rl.isKeyDown(.a) or rl.isKeyDown(.left)) {
-            move_cmd = .{ .direction = .Left, .speed = SPEED, .delta = dt };
-        } else if (rl.isKeyDown(.d) or rl.isKeyDown(.right)) {
-            move_cmd = .{ .direction = .Right, .speed = SPEED, .delta = dt };
-        } else if (rl.isKeyPressed(.m)) {
-            self.toggle_map();
-        } else if (rl.isKeyPressed(.p)) {
-            // Toggle plot visibility
-            self.show_plots = !self.show_plots;
-        } else if (rl.isKeyPressed(.g)) {
-            self.show_tile_grid = !self.show_tile_grid;
-        } else if (rl.isKeyPressed(.f)) {
-            self.show_fences = !self.show_fences;
-        } else if (rl.isKeyPressed(.n)) {
-            self.show_sprite_debug = !self.show_sprite_debug;
-        }
-
-        self.nearby_plot_id = findNearbyPlot(self.game_state.getPlots(), self.world, self.player);
-
-        if (rl.isKeyPressed(.e)) {
-            if (self.nearby_plot_id) |plot_id| {
-                self.selected_plot_id = plot_id;
-                if (self.game_state.getPlotById(plot_id)) |plot| {
-                    std.debug.print("Selected plot #{} at ({}, {}), size {}x{}\n", .{
-                        plot.id,
-                        plot.tile_x,
-                        plot.tile_y,
-                        plot.width_tiles,
-                        plot.height_tiles,
-                    });
-                    if (plot.owner.kind != .none) {
-                        std.debug.print("  Owner: {any}\n", .{plot.owner});
-                    } else {
-                        std.debug.print("  Unclaimed\n", .{});
-                    }
-                }
-            } else {
-                self.selected_plot_id = null;
+        if (self.modal_menu.is_open) {
+            if (rl.isKeyPressed(.escape)) {
+                self.modal_menu.close();
             }
-        }
+        } else {
+            if (rl.isKeyPressed(.escape) or (rl.isMouseButtonPressed(.left) and rl.checkCollisionPointRec(mouse, menuButtonRect(screen_width)))) {
+                self.modal_menu.open();
+            }
 
-        if (move_cmd) |cmd| {
-            applyMoveToVector(&self.player.pos, cmd, self.world);
-            _ = self.game_state.pushInput(cmd);
+            // Handle keyboard input
+            if (rl.isKeyDown(.w) or rl.isKeyDown(.up)) {
+                move_cmd = .{ .direction = .Up, .speed = SPEED, .delta = dt };
+            } else if (rl.isKeyDown(.s) or rl.isKeyDown(.down)) {
+                move_cmd = .{ .direction = .Down, .speed = SPEED, .delta = dt };
+            } else if (rl.isKeyDown(.a) or rl.isKeyDown(.left)) {
+                move_cmd = .{ .direction = .Left, .speed = SPEED, .delta = dt };
+            } else if (rl.isKeyDown(.d) or rl.isKeyDown(.right)) {
+                move_cmd = .{ .direction = .Right, .speed = SPEED, .delta = dt };
+            } else if (rl.isKeyPressed(.m)) {
+                self.toggle_map();
+            } else if (rl.isKeyPressed(.p)) {
+                self.show_plots = !self.show_plots;
+            } else if (rl.isKeyPressed(.g)) {
+                self.show_tile_grid = !self.show_tile_grid;
+            } else if (rl.isKeyPressed(.f)) {
+                self.show_fences = !self.show_fences;
+            } else if (rl.isKeyPressed(.n)) {
+                self.show_sprite_debug = !self.show_sprite_debug;
+            }
+
+            self.nearby_plot_id = findNearbyPlot(self.game_state.getPlots(), self.world, self.player);
+
+            if (rl.isKeyPressed(.e)) {
+                if (self.nearby_plot_id) |plot_id| {
+                    self.selected_plot_id = plot_id;
+                    if (self.game_state.getPlotById(plot_id)) |plot| {
+                        std.debug.print("Selected plot #{} at ({}, {}), size {}x{}\n", .{
+                            plot.id,
+                            plot.tile_x,
+                            plot.tile_y,
+                            plot.width_tiles,
+                            plot.height_tiles,
+                        });
+                        if (plot.owner.kind != .none) {
+                            std.debug.print("  Owner: {any}\n", .{plot.owner});
+                        } else {
+                            std.debug.print("  Unclaimed\n", .{});
+                        }
+                    }
+                } else {
+                    self.selected_plot_id = null;
+                }
+            }
+
+            if (move_cmd) |cmd| {
+                applyMoveToVector(&self.player.pos, cmd, self.world);
+                _ = self.game_state.pushInput(cmd);
+            }
         }
 
         // Camera Update
@@ -346,8 +364,8 @@ pub const WorldScreen = struct {
         // Let's handle keys directly for now to be safe and avoid static globals.
         // I will stub the menu actions.
 
-        const menu_items = [_]MenuItem{};
-        self.top_menu.drawAsSidebar(250, screen_height, menu_items[0..], &self.active_menu_item, "Construction");
+        const sidebar_items = [_]MenuItem{};
+        self.top_menu.drawAsSidebar(250, screen_height, sidebar_items[0..], &self.active_menu_item, "Construction");
 
         if (self.map_opened) {
             const minimap_pos = rl.Vector2{
@@ -366,7 +384,7 @@ pub const WorldScreen = struct {
 
         // Plot controls help text
         const help_y = screen_height - 80;
-        rl.drawText("P: Plots | G: Grid | F: Fences | B: Debug | M: Map", 10, help_y, 16, rl.Color.init(200, 200, 200, 255));
+        rl.drawText("P: Plots | G: Grid | F: Fences | B: Debug | M: Map | ESC: Menu", 10, help_y, 16, rl.Color.init(200, 200, 200, 255));
 
         if (self.nearby_plot_id) |plot_id| {
             var nearby_buf: [64]u8 = undefined;
@@ -374,11 +392,75 @@ pub const WorldScreen = struct {
             rl.drawText(nearby_text, 10, help_y + 20, 20, rl.Color.init(255, 255, 0, 255));
         }
 
+        const menu_rect = menuButtonRect(screen_width);
+        _ = widgets.drawSimpleButton("Menu", menu_rect, rl.getMousePosition());
+
+        const menu_items = [_]MenuItem{
+            .{ .label = "Home", .action = menuNoop },
+            .{ .label = "My Plot", .action = menuNoop },
+            .{ .label = "Visit", .action = menuNoop },
+            .{ .label = "Marketplace", .action = menuNoop },
+        };
+
+        const menu_action = self.modal_menu.draw(
+            screen_width,
+            screen_height,
+            menuTitle(self.modal_page),
+            menuBody(self.modal_page),
+            menu_items[0..],
+            &self.modal_active,
+        );
+
+        switch (menu_action) {
+            .Select => |idx| self.modal_page = menuPageFromIndex(idx),
+            .Back => self.modal_menu.close(),
+            else => {},
+        }
+
         if (self.show_sprite_debug) {
             self.fence_asset.drawDebug();
         }
     }
 };
+
+fn menuTitle(page: MenuPage) [:0]const u8 {
+    return switch (page) {
+        .Home => "Home",
+        .Plot => "My Plot",
+        .Visit => "Visit",
+        .Marketplace => "Marketplace",
+    };
+}
+
+fn menuBody(page: MenuPage) [:0]const u8 {
+    return switch (page) {
+        .Home => "Choose a destination from the menu.",
+        .Plot => "Plot view placeholder.",
+        .Visit => "Visit feature placeholder.",
+        .Marketplace => "Marketplace feature placeholder.",
+    };
+}
+
+fn menuButtonRect(screen_width: i32) rl.Rectangle {
+    return .{
+        .x = @as(f32, @floatFromInt(screen_width)) - 140.0,
+        .y = 10.0,
+        .width = 120.0,
+        .height = 36.0,
+    };
+}
+
+fn menuPageFromIndex(idx: usize) MenuPage {
+    return switch (idx) {
+        0 => .Home,
+        1 => .Plot,
+        2 => .Visit,
+        3 => .Marketplace,
+        else => .Home,
+    };
+}
+
+fn menuNoop() void {}
 
 // Helper Functions (Copied from main.zig)
 

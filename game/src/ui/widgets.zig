@@ -155,3 +155,46 @@ fn pasteClipboardText(buf: []u8, len: *usize) void {
 
     buf[len.*] = 0;
 }
+
+/// Simple button helper - returns true if clicked
+pub fn drawSimpleButton(text: [:0]const u8, rect: rl.Rectangle, mouse: rl.Vector2) bool {
+    const hovered = rl.checkCollisionPointRec(mouse, rect);
+    const clicked = rl.isMouseButtonPressed(.left) and hovered;
+
+    rl.drawRectangleRec(rect, if (hovered) rl.Color.sky_blue else rl.Color.light_gray);
+    rl.drawRectangleLinesEx(rect, 2, rl.Color.dark_gray);
+
+    const text_size = 24;
+    const text_width = rl.measureText(text, text_size);
+    rl.drawText(
+        text,
+        @intFromFloat(rect.x + (rect.width - @as(f32, @floatFromInt(text_width))) / 2.0),
+        @intFromFloat(rect.y + (rect.height - text_size) / 2.0),
+        text_size,
+        if (hovered) rl.Color.white else rl.Color.dark_gray,
+    );
+
+    return clicked;
+}
+
+/// Back button helper - returns true if clicked
+pub fn drawBackButton(rect: rl.Rectangle, mouse: rl.Vector2) bool {
+    const hovered = rl.checkCollisionPointRec(mouse, rect);
+    const clicked = rl.isMouseButtonPressed(.left) and hovered;
+
+    rl.drawRectangleRec(rect, if (hovered) rl.Color.dark_gray else rl.Color.light_gray);
+    rl.drawRectangleLinesEx(rect, 2, rl.Color.dark_gray);
+
+    const text = "< Back";
+    const text_size = 16;
+    const text_width = rl.measureText(text, text_size);
+    rl.drawText(
+        text,
+        @intFromFloat(rect.x + (rect.width - @as(f32, @floatFromInt(text_width))) / 2.0),
+        @intFromFloat(rect.y + (rect.height - text_size) / 2.0),
+        text_size,
+        if (hovered) rl.Color.white else rl.Color.dark_gray,
+    );
+
+    return clicked;
+}
