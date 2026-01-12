@@ -1,7 +1,7 @@
 const std = @import("std");
 const rl = @import("raylib");
-const layout = @import("../ui/layout.zig");
-const widgets = @import("../ui/widgets.zig");
+const layout = @import("../client/ui/layout.zig");
+const widgets = @import("../client/ui/widgets.zig");
 const HttpClient = @import("../client/http_client.zig").HttpClient;
 const SceneAction = @import("../core/scene_action.zig").SceneAction;
 

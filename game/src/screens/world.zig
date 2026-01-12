@@ -21,15 +21,15 @@ const command = @import("../movement/command.zig");
 const MovementCommand = @import("../movement/command.zig").MovementCommand;
 const MoveDirection = command.MoveDirection;
 
-const ui_menu = @import("../ui/menu.zig");
+const ui_menu = @import("../client/ui/menu.zig");
 const MenuItem = ui_menu.MenuItem;
 const Menu = ui_menu.Menu;
 
-const plot_ui = @import("../plot/plot_ui.zig");
+const plot_ui = @import("../client/ui/plot.zig");
 const PlotRenderStyle = plot_ui.PlotRenderStyle;
 const plot_decoration = @import("../plot/plot_decoration.zig");
 const Plot = @import("../plot/plot.zig").Plot;
-const widgets = @import("../ui/widgets.zig");
+const widgets = @import("../client/ui/widgets.zig");
 
 const Frames = shared.Frames;
 const LandscapeTile = shared.LandscapeTile;

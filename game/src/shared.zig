@@ -5,19 +5,19 @@ pub const MovementCommand = command.MovementCommand;
 pub const MoveDirection = command.MoveDirection;
 pub const network = @import("network.zig");
 pub const PingPayload = network.PingPayload;
-pub const landscape = @import("tiles/landscape.zig");
+pub const landscape = @import("client/tiles/landscape.zig");
 pub const LandscapeTile = landscape.LandscapeTile;
 pub const drawLandscapeTile = landscape.drawLandscapeTile;
-pub const tiles = @import("tiles/layer.zig");
-pub const sheets = @import("tiles/sheets.zig");
+pub const tiles = @import("client/tiles/layer.zig");
+pub const sheets = @import("client/tiles/sheets.zig");
 pub const Frames = sheets.SpriteSet;
-const t = @import("tiles/terrain.zig");
+const t = @import("core/terrain.zig");
 pub const TerrainType = t.TerrainType;
 
-pub const menu = @import("ui/menu.zig");
+pub const menu = @import("client/ui/menu.zig");
 pub const editor_map = @import("map/editor_map.zig");
-pub const ghost_layer = @import("ui/ghost_layer.zig");
-pub const placement = @import("ui/placement.zig");
+pub const ghost_layer = @import("client/ui/ghost_layer.zig");
+pub const placement = @import("client/ui/placement.zig");
 
 pub const plot_mod = @import("plot/plot.zig");
 pub const Plot = plot_mod.Plot;

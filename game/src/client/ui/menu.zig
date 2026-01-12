@@ -1,6 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("../shared.zig");
+const shared = @import("../../shared.zig");
 const sheets = shared.sheets;
 const MenuSprite = sheets.MenuSprites;
 const MenuSpriteId = sheets.MenuSpriteId;

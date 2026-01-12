@@ -8,7 +8,7 @@
 
 const std = @import("std");
 const command = @import("../movement/command.zig");
-const t = @import("../tiles/terrain.zig");
+const t = @import("terrain.zig");
 pub const TerrainType = t.TerrainType;
 
 const plot_mod = @import("../plot/plot.zig");
