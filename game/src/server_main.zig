@@ -1,11 +1,12 @@
 const std = @import("std");
 const posix = std.posix;
 
-const shared = @import("shared.zig");
-const network = shared.network;
+const core = @import("core/mod.zig");
+const plot_mod = @import("plot/plot.zig");
+const network = @import("network.zig");
 const PlayerStore = @import("db/player_store.zig").PlayerStore;
 
-fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
+fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]plot_mod.Plot {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
@@ -25,7 +26,7 @@ fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
     const root = parsed.value.object;
     const plots_array = root.get("plots").?.array;
 
-    const plots = try allocator.alloc(shared.Plot, plots_array.items.len);
+    const plots = try allocator.alloc(plot_mod.Plot, plots_array.items.len);
 
     for (plots_array.items, 0..) |plot_obj, i| {
         const obj = plot_obj.object;
@@ -35,20 +36,20 @@ fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
         const width_tiles = @as(i32, @intCast(obj.get("width_tiles").?.integer));
         const height_tiles = @as(i32, @intCast(obj.get("height_tiles").?.integer));
 
-        var owner = shared.OwnerId.none();
+        var owner = plot_mod.OwnerId.none();
         if (obj.get("owner")) |owner_obj| {
             const owner_data = owner_obj.object;
             const kind_str = owner_data.get("kind").?.string;
             const kind = parseOwnerIdKind(kind_str) orelse .none;
 
             if (owner_data.get("value")) |value_str| {
-                owner = shared.OwnerId.init(kind, value_str.string);
+                owner = plot_mod.OwnerId.init(kind, value_str.string);
             } else {
-                owner = shared.OwnerId{ .kind = kind };
+                owner = plot_mod.OwnerId{ .kind = kind };
             }
         }
 
-        plots[i] = shared.Plot{
+        plots[i] = plot_mod.Plot{
             .id = id,
             .tile_x = tile_x,
             .tile_y = tile_y,
@@ -61,7 +62,7 @@ fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
     return plots;
 }
 
-fn parseOwnerIdKind(kind_str: []const u8) ?shared.OwnerIdKind {
+fn parseOwnerIdKind(kind_str: []const u8) ?plot_mod.OwnerIdKind {
     if (std.mem.eql(u8, kind_str, "none")) return .none;
     if (std.mem.eql(u8, kind_str, "wallet")) return .wallet;
     if (std.mem.eql(u8, kind_str, "ens")) return .ens;
@@ -72,7 +73,7 @@ fn parseOwnerIdKind(kind_str: []const u8) ?shared.OwnerIdKind {
 
 const Client = struct {
     address: std.net.Address,
-    state: shared.PlayerState,
+    state: core.PlayerState,
     last_heard_ns: i64,
     dirty: bool = false,
 };
@@ -90,8 +91,8 @@ const UdpEchoServer = struct {
     buffer: [1024]u8 = undefined,
     clients: std.AutoHashMap(u32, Client),
     allocator: std.mem.Allocator,
-    world: shared.World,
-    plots: []shared.Plot,
+    world: core.World,
+    plots: []plot_mod.Plot,
     player_store: PlayerStore,
     last_housekeeping_ns: i64 = 0,
 
@@ -110,7 +111,7 @@ const UdpEchoServer = struct {
         _ = try posix.fcntl(sock, posix.F.SETFL, flags);
 
         // Load world data for collision detection
-        const world = try shared.World.loadFromFile(allocator, "assets/worldoutput.json");
+        const world = try core.World.loadFromFile(allocator, "assets/worldoutput.json");
 
         const plots = try loadPlots(allocator, "assets/plots.json");
 
@@ -215,9 +216,9 @@ const UdpEchoServer = struct {
             };
 
             const initial_state = if (loaded_state) |state|
-                shared.PlayerState{ .x = state.x, .y = state.y }
+                core.PlayerState{ .x = state.x, .y = state.y }
             else
-                shared.PlayerState{ .x = DEFAULT_SPAWN_X, .y = DEFAULT_SPAWN_Y };
+                core.PlayerState{ .x = DEFAULT_SPAWN_X, .y = DEFAULT_SPAWN_Y };
 
             res.value_ptr.* = .{
                 .address = addr,
@@ -339,7 +340,7 @@ const UdpEchoServer = struct {
         }
     }
 
-    fn integrateMove(self: *UdpEchoServer, move: network.MovePayload, pos: *shared.PlayerState) void {
+    fn integrateMove(self: *UdpEchoServer, move: network.MovePayload, pos: *core.PlayerState) void {
         const PLAYER_SIZE: f32 = 32.0;
         const move_amount = move.speed * move.delta;
 
@@ -363,7 +364,7 @@ const UdpEchoServer = struct {
         }
     }
 
-    fn sendState(self: *UdpEchoServer, addr: *const std.net.Address, ack_seq: u32, state: shared.PlayerState) !void {
+    fn sendState(self: *UdpEchoServer, addr: *const std.net.Address, ack_seq: u32, state: core.PlayerState) !void {
         const payload = network.PacketPayload{ .state_update = network.StatePayload{
             .x = state.x,
             .y = state.y,

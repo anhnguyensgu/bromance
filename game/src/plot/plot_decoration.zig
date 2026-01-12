@@ -1,9 +1,10 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("../shared.zig");
+const core = @import("../core/mod.zig");
+const plot_mod = @import("plot.zig");
 const sheets = @import("../client/tiles/sheets.zig");
-const Plot = shared.Plot;
-const World = shared.World;
+const Plot = plot_mod.Plot;
+const World = core.World;
 const FenceStyle = sheets.FenceStyle;
 const FenceAsset = sheets.FenceAsset;
 

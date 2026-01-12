@@ -4,8 +4,8 @@ const rl = @import("raylib");
 const MovementCommand = @import("../movement/command.zig").MovementCommand;
 const MoveDirection = @import("../movement/command.zig").MoveDirection;
 const PingPayload = @import("../ping/command.zig").PingPayload;
-const shared = @import("../shared.zig");
-const network = shared.network;
+const network = @import("../network.zig");
+const core = @import("../core/mod.zig");
 const ClientGameState = @import("game_state.zig").ClientGameState;
 
 // Heartbeat interval - must be less than server's CLIENT_TIMEOUT (30s)
@@ -20,10 +20,10 @@ pub const UdpClient = struct {
     running: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
 
     session_id: u32 = 0,
-    world: shared.World,
+    world: core.World,
     last_ping_ns: i64 = 0,
 
-    pub fn init(state: *ClientGameState, world: shared.World, config: struct { server_ip: []const u8, server_port: u16 }) !UdpClient {
+    pub fn init(state: *ClientGameState, world: core.World, config: struct { server_ip: []const u8, server_port: u16 }) !UdpClient {
         const sock = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM | std.posix.SOCK.NONBLOCK, 0);
         errdefer std.posix.close(sock);
 
@@ -159,7 +159,7 @@ pub const UdpClient = struct {
     }
 };
 
-pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand, world: shared.World) void {
+pub fn applyMoveToVector(pos: *rl.Vector2, move: MovementCommand, world: core.World) void {
     const move_amount = move.speed * move.delta;
 
     var new_pos = pos.*;

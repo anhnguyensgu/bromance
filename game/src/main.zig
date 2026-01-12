@@ -11,10 +11,11 @@ const scene_manager = @import("core/scene_manager.zig");
 // Asset management
 const assets = @import("assets/mod.zig");
 
-// Backward compatibility (will be removed in Phase 7)
-const shared = @import("shared.zig");
-const LoginScreen = shared.LoginScreen;
-const HttpClient = shared.HttpClient;
+// Screens
+const LoginScreen = @import("screens/login.zig").LoginScreen;
+
+// HTTP client
+const HttpClient = @import("client/http_client.zig").HttpClient;
 
 pub fn main() !void {
     try runRaylib();
