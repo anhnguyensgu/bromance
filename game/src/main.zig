@@ -1,11 +1,18 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("shared.zig");
 
+// Core game logic modules
+const core = @import("core/mod.zig");
 const context = @import("core/context.zig");
-const scene_manager = @import("core/scene_manager.zig");
-const assets = @import("core/assets.zig");
 
+// Scene management
+const scene_manager = @import("core/scene_manager.zig");
+
+// Asset management
+const assets = @import("assets/mod.zig");
+
+// Backward compatibility (will be removed in Phase 7)
+const shared = @import("shared.zig");
 const LoginScreen = shared.LoginScreen;
 const HttpClient = shared.HttpClient;
 
@@ -37,9 +44,10 @@ pub fn runRaylib() anyerror!void {
         allocator.destroy(http_client);
     }
 
-    // Init Asset Cache
-    const asset_cache = try allocator.create(assets.AssetCache);
-    asset_cache.* = assets.AssetCache.init(allocator);
+    // Init Asset Cache (old pattern - will be migrated to assets/mod.zig)
+    const core_assets = @import("core/assets.zig");
+    const asset_cache = try allocator.create(core_assets.AssetCache);
+    asset_cache.* = core_assets.AssetCache.init(allocator);
     defer {
         asset_cache.deinit();
         allocator.destroy(asset_cache);

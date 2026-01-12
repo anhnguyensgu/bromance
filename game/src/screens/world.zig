@@ -1,6 +1,8 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("../shared.zig");
+
+// Core game logic (world, physics, collision)
+const core = @import("../core/mod.zig");
 
 // New enum-based assets
 const assets_mod = @import("../assets/mod.zig");
@@ -31,9 +33,11 @@ const plot_decoration = @import("../plot/plot_decoration.zig");
 const Plot = @import("../plot/plot.zig").Plot;
 const widgets = @import("../client/ui/widgets.zig");
 
+// Backward compatibility (will be removed in Phase 7)
+const shared = @import("../shared.zig");
 const Frames = shared.Frames;
 const LandscapeTile = shared.LandscapeTile;
-const SceneAction = @import("../core/scene_action.zig").SceneAction;
+const SceneAction = core.SceneAction;
 const ModalMenu = ui_menu.ModalMenu;
 const ModalMenuAction = ui_menu.ModalMenuAction;
 
@@ -41,7 +45,7 @@ const MenuPage = enum { Home, Plot, Visit, Marketplace };
 
 pub const WorldScreen = struct {
     allocator: std.mem.Allocator,
-    world: shared.World,
+    world: core.World,
     player: Character,
     assets: CharacterAssets,
 
@@ -93,9 +97,9 @@ pub const WorldScreen = struct {
         const assets_cache = ctx.assets;
 
         // Load World
-        var world = shared.World.loadFromFile(allocator, "assets/worldoutput.json") catch |err| blk: {
+        var world = core.World.loadFromFile(allocator, "assets/worldoutput.json") catch |err| blk: {
             std.debug.print("Could not load worldoutput.json: {}, falling back to world.json\n", .{err});
-            break :blk try shared.World.loadFromFile(allocator, "assets/world.json");
+            break :blk try core.World.loadFromFile(allocator, "assets/world.json");
         };
         errdefer world.deinit(allocator);
 
@@ -483,7 +487,7 @@ fn menuNoop() void {}
 
 // Helper Functions (Copied from main.zig)
 
-fn findNearbyPlot(plots: []const Plot, world: shared.World, player: Character) ?u64 {
+fn findNearbyPlot(plots: []const Plot, world: core.World, player: Character) ?u64 {
     const player_rect = rl.Rectangle{
         .x = player.pos.x,
         .y = player.pos.y,
@@ -531,7 +535,7 @@ fn findNearbyPlot(plots: []const Plot, world: shared.World, player: Character) ?
     return closest_plot_id;
 }
 
-fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
+fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: core.World) void {
     const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;
     const view_half_h: f32 = (@as(f32, @floatFromInt(screen_height)) * 0.5) / camera.zoom;
     var cam_target_x: f32 = player.pos.x + player.size.x * 0.5;
@@ -542,7 +546,7 @@ fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32,
     camera.target = .init(cam_target_x, cam_target_y);
 }
 
-fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, tileset_texture: rl.Texture2D, world: shared.World) void {
+fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, tileset_texture: rl.Texture2D, world: core.World) void {
     const tile_w = world.width / @as(f32, @floatFromInt(world.tiles_x));
     const tile_h = world.height / @as(f32, @floatFromInt(world.tiles_y));
 
@@ -620,7 +624,7 @@ fn drawOtherPlayer(other_player: anytype, assets: CharacterAssets) void {
     rl.drawTexturePro(texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color{ .r = 200, .g = 200, .b = 255, .a = 255 });
 }
 
-fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: shared.World, size: f32, MINIMAP_POS: rl.Vector2) void {
+fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: core.World, size: f32, MINIMAP_POS: rl.Vector2) void {
     {
         rl.beginTextureMode(target);
         defer rl.endTextureMode();
