@@ -1,3 +1,20 @@
+// ==================================================================================
+// Client Game State - Network Synchronization
+// ==================================================================================
+// This module manages client-side network state for multiplayer games.
+// RESPONSIBILITIES:
+// - Input prediction and reconciliation
+// - Server state snapshots and interpolation
+// - Other player state tracking
+// - Plot data synchronization
+//
+// Separation from other states:
+// - ClientGameState (this file): Network sync, prediction, interpolation
+// - UIState (screens/ui_state.zig): HUD display values only
+// - Character (game/player.zig): Local player entity and animation
+// - World (core/world.zig): Core world logic and collision
+// ==================================================================================
+
 const std = @import("std");
 const rl = @import("raylib");
 const shared = @import("../shared.zig");
@@ -26,6 +43,7 @@ pub const OtherPlayerState = struct {
 };
 
 pub const ClientGameState = struct {
+    // Network synchronization state
     mutex: std.Thread.Mutex = .{},
 
     snapshots: [MAX_SNAPSHOTS]Snapshot = undefined,

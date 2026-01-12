@@ -1,7 +1,8 @@
 const Renderer = @import("../../renderer.zig").Renderer;
-const GameState = @import("../../state.zig").GameState;
+const scenes = @import("../../../scenes/mod.zig");
+const UIState = scenes.UIState;
 
-pub const ValueFn = fn (*const GameState) []const u8;
+pub const ValueFn = fn (*const UIState) []const u8;
 
 pub const TextPanel = struct {
     label: []const u8,
@@ -14,7 +15,7 @@ pub const TextPanel = struct {
     pub fn render(
         self: *const TextPanel,
         renderer: *Renderer,
-        state: *const GameState,
+        state: *const UIState,
     ) void {
         renderer.drawHudLine(self.label, "{s}", .{self.value(state)});
     }

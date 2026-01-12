@@ -1,3 +1,19 @@
+// ==================================================================================
+// Player Entity State
+// ==================================================================================
+// This module defines the player character entity.
+// RESPONSIBILITIES:
+// - Player position and animation state
+// - Visual rendering of the player character
+// - Animation frame updates based on movement
+//
+// Separation from other states:
+// - Character (this file): Player entity position and animation
+// - ClientGameState (client/game_state.zig): Network sync and interpolation
+// - UIState (screens/ui_state.zig): HUD display values (stamina, hearts)
+// - World (core/world.zig): World collision and terrain
+// ==================================================================================
+
 const rl = @import("raylib");
 const MoveDirection = @import("../movement/command.zig").MoveDirection;
 
@@ -67,6 +83,7 @@ pub const CharacterAssets = struct {
 };
 
 pub const Character = struct {
+    // Player entity - position, animation, rendering
     pos: rl.Vector2,
     size: rl.Vector2,
     dir: MoveDirection,
