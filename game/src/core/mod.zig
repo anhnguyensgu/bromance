@@ -7,19 +7,26 @@
 // Dependency rule: core/ MUST NOT import from client/, screens/, or ui/
 // ==================================================================================
 
-// World and game state (will be extracted from shared.zig in Phase 2)
-// TODO Phase 2.1: Extract World, Building, BuildingType from shared.zig
-// pub const World = @import("world.zig").World;
-// pub const Building = @import("world.zig").Building;
-// pub const BuildingType = @import("world.zig").BuildingType;
+// World and game state
+pub const World = @import("world.zig").World;
+pub const Building = @import("world.zig").Building;
+pub const BuildingType = @import("world.zig").BuildingType;
+pub const PlayerState = @import("world.zig").PlayerState;
+pub const Room = @import("world.zig").Room;
+pub const WorldError = @import("world.zig").WorldError;
+pub const CommandInput = @import("world.zig").CommandInput;
+pub const TerrainType = @import("world.zig").TerrainType;
+pub const Plot = @import("world.zig").Plot;
+pub const OwnerId = @import("world.zig").OwnerId;
+pub const OwnerIdKind = @import("world.zig").OwnerIdKind;
+pub const MovementCommand = @import("world.zig").MovementCommand;
+pub const MoveDirection = @import("world.zig").MoveDirection;
 
-// Physics and collision (will be extracted from shared.zig in Phase 2)
-// TODO Phase 2.3: Extract collision logic from shared.zig
-// pub const Physics = @import("physics.zig").Physics;
+// Physics and collision (currently in world.zig methods)
+pub const physics = @import("physics.zig");
 
-// Game rules (placeholder for Phase 2)
-// TODO Phase 2.4: Create rules.zig for game rules
-// pub const Rules = @import("rules.zig").Rules;
+// Game rules (placeholder)
+pub const Rules = @import("rules.zig").Rules;
 
 // Scene management (already exists)
 pub const SceneAction = @import("scene_action.zig").SceneAction;
