@@ -8,7 +8,7 @@ const TileAssets = assets_mod.TileAssets;
 const SpringTerrain = assets_mod.SpringTerrain;
 const LandscapeTileDir = assets_mod.LandscapeTileDir;
 
-const player_mod = @import("../character/player.zig");
+const player_mod = @import("../game/player.zig");
 const Character = player_mod.Character;
 const CharacterAssets = player_mod.CharacterAssets;
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const terrain = @import("./terrain.zig");
 const landscape = @import("./landscape.zig");
-const player = @import("../character/player.zig");
+const player = @import("../game/player.zig");
 
 const TerrainType = terrain.TerrainType;
 
