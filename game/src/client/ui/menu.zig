@@ -1,7 +1,7 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("../../shared.zig");
-const sheets = shared.sheets;
+// Old asset system (deprecated - migrate to assets/mod.zig when possible)
+const sheets = @import("../tiles/sheets.zig");
 const MenuSprite = sheets.MenuSprites;
 const MenuSpriteId = sheets.MenuSpriteId;
 
@@ -198,14 +198,14 @@ pub const ModalMenu = struct {
 // Simple menu sprite bundle so loading/unloading stays with the menu module.
 pub const Menu = struct {
     const Self = @This();
-    sprite_set: shared.sheets.SpriteSet,
+    sprite_set: sheets.SpriteSet,
     layout: MenuLayout,
     is_open: bool = false,
     scroll_offset: f32 = 0, // Scroll offset for sidebar mode
 
     pub fn init(texture: rl.Texture2D, layout: MenuLayout) Menu {
         return .{
-            .sprite_set = shared.sheets.SpriteSet.MenuSheet(texture),
+            .sprite_set = sheets.SpriteSet.MenuSheet(texture),
             .layout = layout,
         };
     }

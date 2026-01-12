@@ -59,19 +59,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Shared module (reused by client & server)
-    const shared_mod = b.addModule("shared", .{
-        .root_source_file = b.path("src/shared.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    shared_mod.addImport("raylib", raylib);
-
     const root_module = b.addModule("zig_client_root", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "shared", .module = shared_mod }},
     });
 
     const exe = b.addExecutable(.{
@@ -96,12 +87,11 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the zig-client demo");
     run_step.dependOn(&run_cmd.step);
 
-    // Server executable (imports shared, links sqlite3)
+    // Server executable
     const server_mod = b.addModule("zig_server_root", .{
         .root_source_file = b.path("src/server_main.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "shared", .module = shared_mod }},
     });
     const server_exe = b.addExecutable(.{ .name = "zig-server", .root_module = server_mod });
     server_exe.linkSystemLibrary("sqlite3");
@@ -116,7 +106,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/tile_inspector.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "shared", .module = shared_mod }},
     });
     const inspector_exe = b.addExecutable(.{ .name = "tile-inspector", .root_module = inspector_mod });
     inspector_exe.linkLibrary(raylib_artifact);

@@ -33,10 +33,14 @@ const plot_decoration = @import("../plot/plot_decoration.zig");
 const Plot = @import("../plot/plot.zig").Plot;
 const widgets = @import("../client/ui/widgets.zig");
 
-// Backward compatibility (will be removed in Phase 7)
-const shared = @import("../shared.zig");
-const Frames = shared.Frames;
-const LandscapeTile = shared.LandscapeTile;
+// Old asset system (deprecated - migrate to assets/mod.zig when possible)
+const landscape_mod = @import("../client/tiles/landscape.zig");
+const LandscapeTile = landscape_mod.LandscapeTile;
+const drawLandscapeTile = landscape_mod.drawLandscapeTile;
+const sheets = @import("../client/tiles/sheets.zig");
+const Frames = sheets.SpriteSet;
+const FenceAsset = sheets.FenceAsset;
+
 const SceneAction = core.SceneAction;
 const ModalMenu = ui_menu.ModalMenu;
 const ModalMenuAction = ui_menu.ModalMenuAction;
@@ -60,7 +64,7 @@ pub const WorldScreen = struct {
     tileset_texture: rl.Texture2D,
     townhall_texture: rl.Texture2D,
     lake_texture: rl.Texture2D,
-    fence_asset: shared.sheets.FenceAsset,
+    fence_asset: FenceAsset,
     grass: Frames,
 
     // New enum-based assets
@@ -117,7 +121,7 @@ pub const WorldScreen = struct {
 
         const fence_texture = try assets_cache.getTexture("assets/farmrpg/objects/fencescopiar.png");
         rl.setTextureFilter(fence_texture, .point);
-        const fence_asset = shared.sheets.FenceAsset.init(fence_texture);
+        const fence_asset = FenceAsset.init(fence_texture);
 
         const grass = Frames{
             .SpringTiles = .{
@@ -328,7 +332,7 @@ pub const WorldScreen = struct {
 
         rl.beginMode2D(render_camera);
 
-        shared.drawGrassBackground(self.grass, self.world);
+        drawGrassBackground(self.grass, self.world);
 
         // Draw plots before buildings (so buildings appear on top)
         if (self.show_plots) {
@@ -674,4 +678,41 @@ fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: core
     };
     rl.drawTexturePro(target.texture, src, dst, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
     rl.drawRectangleLines(@intFromFloat(dst.x), @intFromFloat(dst.y), @intFromFloat(size), @intFromFloat(size), .black);
+}
+
+// ==================================================================================
+// Legacy utility function for drawing grass backgrounds
+// TODO: Migrate to new enum-based asset system (assets/mod.zig)
+// ==================================================================================
+fn drawGrassBackground(grass: Frames, world: core.World) void {
+    const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
+    const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
+
+    var ty: i32 = 0;
+    while (ty < world.tiles_y) : (ty += 1) {
+        var tx: i32 = 0;
+        while (tx < world.tiles_x) : (tx += 1) {
+            const x = @as(f32, @floatFromInt(tx)) * tile_w;
+            const y = @as(f32, @floatFromInt(ty)) * tile_h;
+
+            const dir: LandscapeTile.Dir = blk: {
+                const is_left = tx == 0;
+                const is_right = tx == world.tiles_x - 1;
+                const is_top = ty == 0;
+                const is_bottom = ty == world.tiles_y - 1;
+
+                if (is_left and is_top) break :blk .TopLeftCorner;
+                if (is_right and is_top) break :blk .TopRightCorner;
+                if (is_left and is_bottom) break :blk .BottomLeftCorner;
+                if (is_right and is_bottom) break :blk .BottomRightCorner;
+                if (is_left) break :blk .Left;
+                if (is_right) break :blk .Right;
+                if (is_top) break :blk .Top;
+                if (is_bottom) break :blk .Bottom;
+                break :blk .Center;
+            };
+
+            drawLandscapeTile(grass, dir, x, y);
+        }
+    }
 }
