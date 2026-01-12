@@ -2,6 +2,12 @@ const std = @import("std");
 const rl = @import("raylib");
 const shared = @import("../shared.zig");
 
+// New enum-based assets
+const assets_mod = @import("../assets/mod.zig");
+const TileAssets = assets_mod.TileAssets;
+const SpringTerrain = assets_mod.SpringTerrain;
+const LandscapeTileDir = assets_mod.LandscapeTileDir;
+
 const player_mod = @import("../character/player.zig");
 const Character = player_mod.Character;
 const CharacterAssets = player_mod.CharacterAssets;
@@ -46,12 +52,15 @@ pub const WorldScreen = struct {
     camera: rl.Camera2D,
     minimap: rl.RenderTexture2D,
 
-    // Textures & Sprites
+    // Textures & Sprites (old system - to be deprecated)
     tileset_texture: rl.Texture2D,
     townhall_texture: rl.Texture2D,
     lake_texture: rl.Texture2D,
     fence_asset: shared.sheets.FenceAsset,
     grass: Frames,
+
+    // New enum-based assets
+    tile_assets: TileAssets,
 
     // UI
     top_menu: Menu,
@@ -138,6 +147,13 @@ pub const WorldScreen = struct {
             .server_port = 9999,
         });
 
+        // Initialize new enum-based tile assets
+        const tile_assets = try TileAssets.init();
+        errdefer {
+            var tmp = tile_assets;
+            tmp.deinit();
+        }
+
         return WorldScreen{
             .allocator = allocator,
             .world = world,
@@ -153,6 +169,7 @@ pub const WorldScreen = struct {
             .lake_texture = lake_texture,
             .fence_asset = fence_asset,
             .grass = grass,
+            .tile_assets = tile_assets,
             .top_menu = top_menu,
             .menu_texture = menu_texture,
             .modal_menu = ModalMenu.init(.{}),
@@ -183,6 +200,8 @@ pub const WorldScreen = struct {
         // rl.unloadTexture(self.tileset_texture);
 
         self.assets.deinit();
+        var tmp_tile_assets = self.tile_assets;
+        tmp_tile_assets.deinit();
         self.world.deinit(self.allocator);
     }
 

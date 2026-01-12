@@ -150,11 +150,13 @@ util ← core ← game ← scenes
 
 | Current (AssetCache) | New (Enum-based) |
 |---------------------|------------------|
-| `StringHashMap` (runtime) | `EnumArray` (compile-time) |
+| `StringHashMap` (runtime) | Direct field access (compile-time) |
 | String keys (typo-prone) | Enum values (type-safe) |
 | Runtime allocations | Stack-allocated |
-| `getTexture("path.png")` | `getTilesheet(.dungeon)` |
+| `getTexture("path.png")` | `tile_assets.spring_tiles` |
+| Magic number indices | Named tile enums: `.grass`, `.water` |
 | No sprite metadata | `SpriteSheet` with dimensions |
+| `draw(texture, 5, x, y)` | `spring_tiles.draw(.grass, x, y)` |
 
 #### Step 0.1: Create `assets/sprite_sheet.zig`
 
@@ -227,6 +229,59 @@ const std = @import("std");
 const rl = @import("raylib");
 const SpriteSheet = @import("sprite_sheet.zig").SpriteSheet;
 
+/// Spring tileset tile indices (type-safe)
+pub const SpringTile = enum(u32) {
+    grass = 0,
+    grass_flowers = 1,
+    dirt = 2,
+    stone_path = 3,
+    water = 4,
+    sand = 5,
+    // Add more tiles as they're identified in the sprite sheet
+};
+
+/// Dungeon tileset tile indices (type-safe)
+pub const DungeonTile = enum(u32) {
+    floor = 0,
+    wall = 1,
+    door = 2,
+    // Add more tiles as needed
+};
+
+/// Typed Spring tileset wrapper
+pub const SpringTileSheet = struct {
+    sheet: SpriteSheet,
+
+    pub fn draw(self: SpringTileSheet, tile: SpringTile, x: i32, y: i32) void {
+        self.sheet.draw(@intFromEnum(tile), x, y);
+    }
+
+    pub fn drawScaled(self: SpringTileSheet, tile: SpringTile, dest_rect: rl.Rectangle) void {
+        self.sheet.drawScaled(@intFromEnum(tile), dest_rect);
+    }
+
+    pub fn getSourceRect(self: SpringTileSheet, tile: SpringTile) rl.Rectangle {
+        return self.sheet.getSourceRect(@intFromEnum(tile));
+    }
+};
+
+/// Typed Dungeon tileset wrapper
+pub const DungeonTileSheet = struct {
+    sheet: SpriteSheet,
+
+    pub fn draw(self: DungeonTileSheet, tile: DungeonTile, x: i32, y: i32) void {
+        self.sheet.draw(@intFromEnum(tile), x, y);
+    }
+
+    pub fn drawScaled(self: DungeonTileSheet, tile: DungeonTile, dest_rect: rl.Rectangle) void {
+        self.sheet.drawScaled(@intFromEnum(tile), dest_rect);
+    }
+
+    pub fn getSourceRect(self: DungeonTileSheet, tile: DungeonTile) rl.Rectangle {
+        return self.sheet.getSourceRect(@intFromEnum(tile));
+    }
+};
+
 /// Tile sheet asset IDs (compile-time safe)
 pub const TileSheetId = enum {
     spring_tiles,
@@ -237,32 +292,24 @@ pub const TileSheetId = enum {
 
 /// Main Assets struct for tile sheets
 pub const TileAssets = struct {
-    sheets: std.EnumArray(TileSheetId, SpriteSheet),
+    spring_tiles: SpringTileSheet,
+    // dungeon: DungeonTileSheet,
+    // Add more typed sheets as needed
 
     pub fn init() !TileAssets {
-        var sheets = std.EnumArray(TileSheetId, SpriteSheet).initUndefined();
-
-        // Spring tileset (16x16 tiles, 1px spacing, 12 columns)
-        sheets.set(.spring_tiles, try SpriteSheet.init(
-            "assets/spring.png", 16, 16, 1, 12
-        ));
-
-        // Add more tilesets as needed:
-        // sheets.set(.dungeon, try SpriteSheet.init("assets/dungeon.png", 16, 16, 1, 12));
-        // sheets.set(.forest, try SpriteSheet.init("assets/forest.png", 16, 16, 1, 12));
-
-        return .{ .sheets = sheets };
+        return .{
+            .spring_tiles = .{
+                .sheet = try SpriteSheet.init("assets/spring.png", 16, 16, 1, 12),
+            },
+            // .dungeon = .{
+            //     .sheet = try SpriteSheet.init("assets/dungeon.png", 16, 16, 1, 12),
+            // },
+        };
     }
 
     pub fn deinit(self: *TileAssets) void {
-        var iter = self.sheets.iterator();
-        while (iter.next()) |entry| {
-            entry.value.deinit();
-        }
-    }
-
-    pub fn getSheet(self: *TileAssets, id: TileSheetId) *SpriteSheet {
-        return self.sheets.getPtr(id);
+        self.spring_tiles.sheet.deinit();
+        // self.dungeon.sheet.deinit();
     }
 };
 ```
@@ -276,33 +323,52 @@ const std = @import("std");
 const rl = @import("raylib");
 const SpriteSheet = @import("sprite_sheet.zig").SpriteSheet;
 
-pub const CharacterSheetId = enum {
-    main_character,
-    npc_villager,
+/// Main character animation frames (type-safe)
+pub const MainCharacterFrame = enum(u32) {
+    idle_down = 0,
+    walk_down_1 = 1,
+    walk_down_2 = 2,
+    idle_up = 3,
+    walk_up_1 = 4,
+    walk_up_2 = 5,
+    idle_left = 6,
+    walk_left_1 = 7,
+    walk_left_2 = 8,
+    idle_right = 9,
+    walk_right_1 = 10,
+    walk_right_2 = 11,
+};
+
+/// Typed Main Character sprite sheet wrapper
+pub const MainCharacterSheet = struct {
+    sheet: SpriteSheet,
+
+    pub fn draw(self: MainCharacterSheet, frame: MainCharacterFrame, x: i32, y: i32) void {
+        self.sheet.draw(@intFromEnum(frame), x, y);
+    }
+
+    pub fn drawScaled(self: MainCharacterSheet, frame: MainCharacterFrame, dest_rect: rl.Rectangle) void {
+        self.sheet.drawScaled(@intFromEnum(frame), dest_rect);
+    }
+
+    pub fn getSourceRect(self: MainCharacterSheet, frame: MainCharacterFrame) rl.Rectangle {
+        return self.sheet.getSourceRect(@intFromEnum(frame));
+    }
 };
 
 pub const CharacterAssets = struct {
-    sheets: std.EnumArray(CharacterSheetId, SpriteSheet),
+    main_character: MainCharacterSheet,
 
     pub fn init() !CharacterAssets {
-        var sheets = std.EnumArray(CharacterSheetId, SpriteSheet).initUndefined();
-
-        sheets.set(.main_character, try SpriteSheet.init(
-            "assets/characters/main.png", 32, 32, 0, 4
-        ));
-
-        return .{ .sheets = sheets };
+        return .{
+            .main_character = .{
+                .sheet = try SpriteSheet.init("assets/characters/main.png", 32, 32, 0, 4),
+            },
+        };
     }
 
     pub fn deinit(self: *CharacterAssets) void {
-        var iter = self.sheets.iterator();
-        while (iter.next()) |entry| {
-            entry.value.deinit();
-        }
-    }
-
-    pub fn getSheet(self: *CharacterAssets, id: CharacterSheetId) *SpriteSheet {
-        return self.sheets.getPtr(id);
+        self.main_character.sheet.deinit();
     }
 };
 ```
@@ -312,11 +378,20 @@ pub const CharacterAssets = struct {
 **New file:** `src/assets/mod.zig`
 
 ```zig
+// Core types
 pub const SpriteSheet = @import("sprite_sheet.zig").SpriteSheet;
+
+// Tile assets
 pub const TileAssets = @import("tiles.zig").TileAssets;
-pub const TileSheetId = @import("tiles.zig").TileSheetId;
+pub const SpringTile = @import("tiles.zig").SpringTile;
+pub const DungeonTile = @import("tiles.zig").DungeonTile;
+pub const SpringTileSheet = @import("tiles.zig").SpringTileSheet;
+pub const DungeonTileSheet = @import("tiles.zig").DungeonTileSheet;
+
+// Character assets
 pub const CharacterAssets = @import("characters.zig").CharacterAssets;
-pub const CharacterSheetId = @import("characters.zig").CharacterSheetId;
+pub const MainCharacterFrame = @import("characters.zig").MainCharacterFrame;
+pub const MainCharacterSheet = @import("characters.zig").MainCharacterSheet;
 ```
 
 #### Step 0.5: Update `screens/world.zig` (and other consumers)
@@ -334,8 +409,9 @@ const grass_tex = try asset_cache.getTexture("assets/grass.png");
 const assets = @import("../assets/mod.zig");
 var tile_assets = try assets.TileAssets.init();
 defer tile_assets.deinit();
-const spring_sheet = tile_assets.getSheet(.spring_tiles);
-spring_sheet.draw(5, x, y);  // Draw tile index 5
+// Type-safe, self-documenting tile drawing
+tile_assets.spring_tiles.draw(.grass, x, y);
+tile_assets.spring_tiles.draw(.water, x2, y2);
 ```
 
 #### Step 0.6: Migrate Existing Tile Calls
@@ -347,13 +423,17 @@ spring_sheet.draw(5, x, y);  // Draw tile index 5
 
 **Migration pattern:**
 ```zig
-// OLD
+// OLD - String keys, magic numbers, runtime lookups
 const grass_frames = shared.Frames.SpringTileGrass(texture, 0, 0);
 shared.drawLandscapeTile(grass_frames, x, y);
 
-// NEW
-const spring = tile_assets.getSheet(.spring_tiles);
-spring.draw(0, x, y);  // Grass is at index 0
+// NEW - Type-safe enums, compile-time checked
+tile_assets.spring_tiles.draw(.grass, x, y);
+
+// Multiple tiles example
+tile_assets.spring_tiles.draw(.grass, x, y);
+tile_assets.spring_tiles.draw(.water, x + 16, y);
+tile_assets.spring_tiles.draw(.dirt, x, y + 16);
 ```
 
 #### Step 0.7: Deprecate Old Files (After Testing)

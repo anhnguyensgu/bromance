@@ -6,6 +6,21 @@ const player = @import("../character/player.zig");
 
 const TerrainType = terrain.TerrainType;
 
+// ==================================================================================
+// DEPRECATED: This file will be replaced by src/assets/ module
+// ==================================================================================
+// The new enum-based assets system in src/assets/ provides:
+// - Type-safe terrain enums: SpringTerrain.grass, SpringTerrain.water, etc.
+// - Type-safe tile direction enums: LandscapeTileDir.center, .top_left_corner, etc.
+// - Cleaner API: tile_assets.spring_tiles.drawTerrain(.grass, .center, x, y)
+//
+// For new code, use:
+//   const assets = @import("../assets/mod.zig");
+//   var tile_assets = try assets.TileAssets.init();
+//
+// This file will be removed in Phase 0.7 of the refactoring plan.
+// ==================================================================================
+
 /// Simple descriptor for a sub-rectangle in a spritesheet.
 pub const SpriteRect = struct {
     x: f32,
