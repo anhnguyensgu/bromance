@@ -1,6 +1,22 @@
 const std = @import("std");
 const rl = @import("raylib");
 
+// ==================================================================================
+// DEPRECATED: This file will be replaced by src/assets/ module
+// ==================================================================================
+// The new enum-based assets system in src/assets/ provides:
+// - Type safety with enums instead of string keys
+// - Compile-time validation
+// - Zero runtime cost (no HashMap lookups)
+// - Self-documenting code
+//
+// For new code, use:
+//   const assets = @import("../assets/mod.zig");
+//   var tile_assets = try assets.TileAssets.init();
+//
+// This AssetCache will be removed in Phase 0.7 of the refactoring plan.
+// ==================================================================================
+
 pub const AssetCache = struct {
     allocator: std.mem.Allocator,
     textures: std.StringHashMap(rl.Texture2D),

@@ -1,7 +1,7 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("../shared.zig");
-const sheets = shared.sheets;
+// Old asset system (deprecated - migrate to assets/mod.zig when possible)
+const sheets = @import("../tiles/sheets.zig");
 const MenuSprite = sheets.MenuSprites;
 const MenuSpriteId = sheets.MenuSpriteId;
 
@@ -38,17 +38,174 @@ pub const MenuItem = struct {
     }
 };
 
+pub const ModalMenuLayout = struct {
+    width: f32 = 520.0,
+    height: f32 = 320.0,
+    padding: f32 = 24.0,
+    header_height: f32 = 60.0,
+    item_height: f32 = 36.0,
+    item_gap: f32 = 8.0,
+    menu_width: f32 = 180.0,
+    body_offset_x: f32 = 220.0,
+    body_offset_y: f32 = 90.0,
+    back_width: f32 = 100.0,
+    back_height: f32 = 36.0,
+    title_size: i32 = 26,
+    body_size: i32 = 18,
+};
+
+pub const ModalMenuAction = union(enum) {
+    None,
+    Select: usize,
+    Back,
+};
+
+pub const ModalMenu = struct {
+    const Self = @This();
+
+    layout: ModalMenuLayout,
+    is_open: bool = false,
+
+    pub fn init(layout: ModalMenuLayout) ModalMenu {
+        return .{ .layout = layout };
+    }
+
+    pub fn toggle(self: *Self) void {
+        self.is_open = !self.is_open;
+    }
+
+    pub fn open(self: *Self) void {
+        self.is_open = true;
+    }
+
+    pub fn close(self: *Self) void {
+        self.is_open = false;
+    }
+
+    pub fn draw(
+        self: *Self,
+        screen_width: i32,
+        screen_height: i32,
+        title: [:0]const u8,
+        body: [:0]const u8,
+        items: []const MenuItem,
+        active_item: ?*?usize,
+    ) ModalMenuAction {
+        if (!self.is_open) return .None;
+
+        rl.drawRectangle(0, 0, screen_width, screen_height, .init(0, 0, 0, 160));
+
+        const dialog = rl.Rectangle{
+            .x = @as(f32, @floatFromInt(screen_width)) / 2.0 - self.layout.width / 2.0,
+            .y = @as(f32, @floatFromInt(screen_height)) / 2.0 - self.layout.height / 2.0,
+            .width = self.layout.width,
+            .height = self.layout.height,
+        };
+
+        rl.drawRectangleRec(dialog, .ray_white);
+        rl.drawRectangleLinesEx(dialog, 2, .dark_gray);
+
+        const title_width = rl.measureText(title, self.layout.title_size);
+        rl.drawText(
+            title,
+            @intFromFloat(dialog.x + (dialog.width - @as(f32, @floatFromInt(title_width))) / 2.0),
+            @intFromFloat(dialog.y + 16.0),
+            self.layout.title_size,
+            .dark_gray,
+        );
+
+        const mouse = rl.getMousePosition();
+        const clicked = rl.isMouseButtonPressed(.left);
+
+        var action: ModalMenuAction = .None;
+        var idx: usize = 0;
+        while (idx < items.len) : (idx += 1) {
+            const item = items[idx];
+            const rect = rl.Rectangle{
+                .x = dialog.x + self.layout.padding,
+                .y = dialog.y + self.layout.header_height + @as(f32, @floatFromInt(idx)) * (self.layout.item_height + self.layout.item_gap),
+                .width = self.layout.menu_width,
+                .height = self.layout.item_height,
+            };
+
+            const hovered = rl.checkCollisionPointRec(mouse, rect);
+            var is_active = false;
+            if (active_item) |ptr| {
+                if (ptr.*) |current| {
+                    is_active = (current == idx);
+                }
+            }
+
+            if (item.custom_draw == null) {
+                const base_color = rl.Color{ .r = 60, .g = 64, .b = 72, .a = 255 };
+                const border_color = rl.Color{ .r = 90, .g = 94, .b = 104, .a = 255 };
+                rl.drawRectangleRec(rect, base_color);
+                rl.drawRectangleLinesEx(rect, 1, border_color);
+            }
+
+            item.draw(rect, is_active, hovered);
+
+            if (hovered and clicked) {
+                if (active_item) |ptr| {
+                    ptr.* = idx;
+                }
+                if (item.action_ctx) |handler| {
+                    handler(item.ctx);
+                } else {
+                    item.action();
+                }
+                action = .{ .Select = idx };
+            }
+        }
+
+        const back_text = "X";
+        const back_width = rl.measureText(back_text, 16);
+        const back_rect = rl.Rectangle{
+            .x = dialog.x + dialog.width - self.layout.padding - @as(f32, @floatFromInt(back_width)),
+            .y = dialog.y + self.layout.padding / 2,
+            .width = @as(f32, @floatFromInt(back_width)) + 16.0,
+            .height = self.layout.back_height,
+        };
+
+        const back_hovered = rl.checkCollisionPointRec(mouse, back_rect);
+        rl.drawRectangleRec(back_rect, if (back_hovered) rl.Color.dark_gray else rl.Color.light_gray);
+        rl.drawRectangleLinesEx(back_rect, 2, rl.Color.dark_gray);
+
+        rl.drawText(
+            back_text,
+            @intFromFloat(back_rect.x + (back_rect.width - @as(f32, @floatFromInt(back_width))) / 2.0),
+            @intFromFloat(back_rect.y + (back_rect.height - 16) / 2.0),
+            16,
+            if (back_hovered) .white else .dark_gray,
+        );
+
+        if (back_hovered and clicked) {
+            action = .Back;
+        }
+
+        rl.drawText(
+            body,
+            @intFromFloat(dialog.x + self.layout.body_offset_x),
+            @intFromFloat(dialog.y + self.layout.body_offset_y),
+            self.layout.body_size,
+            .gray,
+        );
+
+        return action;
+    }
+};
+
 // Simple menu sprite bundle so loading/unloading stays with the menu module.
 pub const Menu = struct {
     const Self = @This();
-    sprite_set: shared.sheets.SpriteSet,
+    sprite_set: sheets.SpriteSet,
     layout: MenuLayout,
     is_open: bool = false,
     scroll_offset: f32 = 0, // Scroll offset for sidebar mode
 
     pub fn init(texture: rl.Texture2D, layout: MenuLayout) Menu {
         return .{
-            .sprite_set = shared.sheets.SpriteSet.MenuSheet(texture),
+            .sprite_set = sheets.SpriteSet.MenuSheet(texture),
             .layout = layout,
         };
     }

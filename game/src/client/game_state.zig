@@ -1,7 +1,30 @@
+// ==================================================================================
+// Client Game State - Network Synchronization
+// ==================================================================================
+// This module manages client-side network state for multiplayer games.
+// RESPONSIBILITIES:
+// - Input prediction and reconciliation
+// - Server state snapshots and interpolation
+// - Other player state tracking
+// - Plot data synchronization
+//
+// Separation from other states:
+// - ClientGameState (this file): Network sync, prediction, interpolation
+// - UIState (screens/ui_state.zig): HUD display values only
+// - Character (game/player.zig): Local player entity and animation
+// - World (core/world.zig): Core world logic and collision
+// ==================================================================================
+
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("../shared.zig");
-const network = shared.network;
+
+// Core game logic
+const core = @import("../core/mod.zig");
+
+// Network protocol
+const network = @import("../network.zig");
+
+// Movement commands
 const MovementCommand = @import("../movement/command.zig").MovementCommand;
 const MoveDirection = @import("../movement/command.zig").MoveDirection;
 
@@ -26,6 +49,7 @@ pub const OtherPlayerState = struct {
 };
 
 pub const ClientGameState = struct {
+    // Network synchronization state
     mutex: std.Thread.Mutex = .{},
 
     snapshots: [MAX_SNAPSHOTS]Snapshot = undefined,
@@ -34,7 +58,7 @@ pub const ClientGameState = struct {
     other_players_buffers: [2]std.AutoHashMap(u32, OtherPlayerState),
     active_buffer: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
 
-    plots: std.ArrayList(shared.Plot),
+    plots: std.ArrayList(core.Plot),
 
     pending_moves: [MAX_PENDING_MOVES]PendingMove = undefined,
     pending_count: usize = 0,
@@ -52,7 +76,7 @@ pub const ClientGameState = struct {
                 std.AutoHashMap(u32, OtherPlayerState).init(allocator),
                 std.AutoHashMap(u32, OtherPlayerState).init(allocator),
             },
-            .plots = try std.ArrayList(shared.Plot).initCapacity(allocator, 8),
+            .plots = try std.ArrayList(core.Plot).initCapacity(allocator, 8),
             .allocator = allocator,
             .session_id = random_session_id,
         };
@@ -72,13 +96,13 @@ pub const ClientGameState = struct {
 
         for (0..plots_data.count) |i| {
             const plot_data = plots_data.plots[i];
-            const owner = shared.OwnerId{
+            const owner = core.OwnerId{
                 .kind = @enumFromInt(plot_data.owner_kind),
                 .len = plot_data.owner_len,
                 .value = plot_data.owner_value,
             };
 
-            try self.plots.append(self.allocator, shared.Plot{
+            try self.plots.append(self.allocator, core.Plot{
                 .id = plot_data.id,
                 .tile_x = plot_data.tile_x,
                 .tile_y = plot_data.tile_y,
@@ -91,11 +115,11 @@ pub const ClientGameState = struct {
         std.debug.print("Received {d} plots from server\n", .{plots_data.count});
     }
 
-    pub fn getPlots(self: *const ClientGameState) []const shared.Plot {
+    pub fn getPlots(self: *const ClientGameState) []const core.Plot {
         return self.plots.items;
     }
 
-    pub fn getPlotById(self: *const ClientGameState, id: u64) ?*const shared.Plot {
+    pub fn getPlotById(self: *const ClientGameState, id: u64) ?*const core.Plot {
         for (self.plots.items) |*plot| {
             if (plot.id == id) {
                 return plot;
@@ -167,7 +191,7 @@ pub const ClientGameState = struct {
         players: []const network.PlayerInfo,
         own_session_id: u32,
         ack: u32,
-        world: shared.World,
+        world: core.World,
     ) !void {
         const now: i64 = @intCast(std.time.nanoTimestamp());
 
@@ -271,7 +295,7 @@ pub const ClientGameState = struct {
     }
 
     // Reconcile logic needs access to pending moves
-    pub fn reconcileState(self: *ClientGameState, ack: u32, server_pos: rl.Vector2, world: shared.World) rl.Vector2 {
+    pub fn reconcileState(self: *ClientGameState, ack: u32, server_pos: rl.Vector2, world: core.World) rl.Vector2 {
         self.mutex.lock();
         defer self.mutex.unlock();
 

@@ -3,7 +3,7 @@ const rl = @import("raylib");
 const placement = @import("placement.zig");
 const PlaceableItem = placement.PlaceableItem;
 
-const editor_map = @import("../map/editor_map.zig");
+const editor_map = @import("../../map/editor_map.zig");
 const Map = editor_map.Map;
 const TileId = editor_map.TileId;
 

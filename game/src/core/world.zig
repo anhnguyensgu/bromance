@@ -1,28 +1,29 @@
-const std = @import("std");
+// ==================================================================================
+// Core World Logic - NO RENDERING DEPENDENCIES
+// ==================================================================================
+// This module contains pure game logic for world state, buildings, and terrain.
+// CRITICAL: This file MUST NOT import raylib or any rendering code.
+// It should be testable without graphics and runnable on server.
+// ==================================================================================
 
-pub const command = @import("movement/command.zig");
-pub const MovementCommand = command.MovementCommand;
-pub const MoveDirection = command.MoveDirection;
-pub const network = @import("network.zig");
-pub const PingPayload = network.PingPayload;
-pub const landscape = @import("tiles/landscape.zig");
-pub const LandscapeTile = landscape.LandscapeTile;
-pub const drawLandscapeTile = landscape.drawLandscapeTile;
-pub const tiles = @import("tiles/layer.zig");
-pub const sheets = @import("tiles/sheets.zig");
-pub const Frames = sheets.SpriteSet;
-const t = @import("tiles/terrain.zig");
+const std = @import("std");
+const command = @import("../movement/command.zig");
+const t = @import("terrain.zig");
 pub const TerrainType = t.TerrainType;
 
-pub const menu = @import("ui/menu.zig");
-pub const editor_map = @import("map/editor_map.zig");
-pub const ghost_layer = @import("ui/ghost_layer.zig");
-pub const placement = @import("ui/placement.zig");
-
-pub const plot_mod = @import("plot/plot.zig");
+const plot_mod = @import("../plot/plot.zig");
 pub const Plot = plot_mod.Plot;
 pub const OwnerId = plot_mod.OwnerId;
 pub const OwnerIdKind = plot_mod.OwnerIdKind;
+
+// Re-export for convenience
+pub const MovementCommand = command.MovementCommand;
+pub const MoveDirection = command.MoveDirection;
+
+pub const WorldError = error{
+    IndexOutOfBounds,
+    MaxPlayersReached,
+};
 
 pub const PlayerState = struct {
     x: f32,
@@ -33,14 +34,7 @@ pub const CommandInput = union(enum) {
     movement: MovementCommand,
 };
 
-const WorldError = error{
-    IndexOutOfBounds,
-    MaxPlayersReached,
-};
-
 const Map = struct {
-    const Self = @This();
-
     width: f32,
     height: f32,
 };
@@ -68,9 +62,6 @@ pub const Building = struct {
     sprite_width: f32,
     sprite_height: f32,
 };
-
-// Map configuration - now with complete building data
-// Removed MAP_BUILDINGS as it is now part of the World struct instance
 
 pub const World = struct {
     width: f32,
@@ -406,64 +397,20 @@ pub const World = struct {
     }
 };
 
-/// Draw a grass background with a bordered edge, using the same layout
-/// as the tile inspector. This keeps main.zig and tile_inspector.zig
-/// using a single shared implementation.
-pub fn drawGrassBackground(grass: Frames, world: World) void {
-    const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
-    const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
-
-    var ty: i32 = 0;
-    while (ty < world.tiles_y) : (ty += 1) {
-        var tx: i32 = 0;
-        while (tx < world.tiles_x) : (tx += 1) {
-            const x = @as(f32, @floatFromInt(tx)) * tile_w;
-            const y = @as(f32, @floatFromInt(ty)) * tile_h;
-
-            const dir: LandscapeTile.Dir = blk: {
-                const is_left = tx == 0;
-                const is_right = tx == world.tiles_x - 1;
-                const is_top = ty == 0;
-                const is_bottom = ty == world.tiles_y - 1;
-
-                if (is_left and is_top) break :blk .TopLeftCorner;
-                if (is_right and is_top) break :blk .TopRightCorner;
-                if (is_left and is_bottom) break :blk .BottomLeftCorner;
-                if (is_right and is_bottom) break :blk .BottomRightCorner;
-                if (is_left) break :blk .Left;
-                if (is_right) break :blk .Right;
-                if (is_top) break :blk .Top;
-                if (is_bottom) break :blk .Bottom;
-                break :blk .Center;
-            };
-
-            drawLandscapeTile(grass, dir, x, y);
-        }
-    }
-}
-
 pub const Room = struct {
-    const Self = @This();
-
     players: []*PlayerState,
     width: f32,
     height: f32,
 
-    // //
-    // keys: []u64, // user IDs
-    // slots: []u16, // assigned room index
-    // states: []u8, // 0=EMPTY, 1=OCCUPIED, 2=TOMBSTONE
-
-    pub fn init(_: usize) Self {
-        // var players = [capacity]*PlayerState{};
-        return Self{
-            // .players = players[0..],
-            // .width = 100.0,
-            // .height = 100.0,
+    pub fn init(_: usize) Room {
+        return Room{
+            .players = undefined,
+            .width = 0,
+            .height = 0,
         };
     }
 
-    pub fn calculatePlayerPosition(self: *Self, move: MovementCommand, idx: usize) WorldError!void {
+    pub fn calculatePlayerPosition(self: *Room, move: MovementCommand, idx: usize) WorldError!void {
         if (idx >= self.players.len) {
             return WorldError.IndexOutOfBounds;
         }
@@ -491,6 +438,31 @@ pub const Room = struct {
         self.players[idx].y = y;
     }
 };
+
+// Helper functions
+fn parseBuildingType(type_str: []const u8) ?BuildingType {
+    if (std.mem.eql(u8, type_str, "Townhall")) return .Townhall;
+    if (std.mem.eql(u8, type_str, "House")) return .House;
+    if (std.mem.eql(u8, type_str, "Shop")) return .Shop;
+    if (std.mem.eql(u8, type_str, "Farm")) return .Farm;
+    if (std.mem.eql(u8, type_str, "Lake")) return .Lake;
+    if (std.mem.eql(u8, type_str, "Road")) return .Road;
+    if (std.mem.eql(u8, type_str, "Tile")) return .Tile;
+    return null;
+}
+
+fn parseOwnerIdKind(kind_str: []const u8) ?OwnerIdKind {
+    if (std.mem.eql(u8, kind_str, "none")) return .none;
+    if (std.mem.eql(u8, kind_str, "wallet")) return .wallet;
+    if (std.mem.eql(u8, kind_str, "ens")) return .ens;
+    if (std.mem.eql(u8, kind_str, "nft")) return .nft;
+    if (std.mem.eql(u8, kind_str, "custom")) return .custom;
+    return null;
+}
+
+// ==================================================================================
+// Tests
+// ==================================================================================
 
 test "player move right" {
     const move = MovementCommand{
@@ -534,26 +506,6 @@ test "player move out of right boundary" {
     try std.testing.expectError(WorldError.IndexOutOfBounds, world.calculatePlayerPosition(move, idx));
 }
 
-fn parseBuildingType(type_str: []const u8) ?BuildingType {
-    if (std.mem.eql(u8, type_str, "Townhall")) return .Townhall;
-    if (std.mem.eql(u8, type_str, "House")) return .House;
-    if (std.mem.eql(u8, type_str, "Shop")) return .Shop;
-    if (std.mem.eql(u8, type_str, "Farm")) return .Farm;
-    if (std.mem.eql(u8, type_str, "Lake")) return .Lake;
-    if (std.mem.eql(u8, type_str, "Road")) return .Road;
-    if (std.mem.eql(u8, type_str, "Tile")) return .Tile;
-    return null;
-}
-
-fn parseOwnerIdKind(kind_str: []const u8) ?OwnerIdKind {
-    if (std.mem.eql(u8, kind_str, "none")) return .none;
-    if (std.mem.eql(u8, kind_str, "wallet")) return .wallet;
-    if (std.mem.eql(u8, kind_str, "ens")) return .ens;
-    if (std.mem.eql(u8, kind_str, "nft")) return .nft;
-    if (std.mem.eql(u8, kind_str, "custom")) return .custom;
-    return null;
-}
-
 test "loadFromFile" {
     const allocator = std.testing.allocator;
     var world_data = try World.loadFromFile(allocator, "assets/world.json");
@@ -565,7 +517,3 @@ test "loadFromFile" {
     try std.testing.expectEqual(@as(i32, 50), world_data.tiles_y);
     try std.testing.expect(world_data.buildings.len > 0);
 }
-
-pub const LoginScreen = @import("screens/login.zig").LoginScreen;
-pub const WorldScreen = @import("screens/world.zig").WorldScreen;
-pub const HttpClient = @import("client/http_client.zig").HttpClient;

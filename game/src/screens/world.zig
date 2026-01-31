@@ -1,10 +1,18 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("../shared.zig");
 
-const player_mod = @import("../character/player.zig");
+// Core game logic (world, physics, collision)
+const core = @import("../core/mod.zig");
+
+// New enum-based assets
+const assets_mod = @import("../assets/mod.zig");
+const TileAssets = assets_mod.TileAssets;
+const SpringTerrain = assets_mod.SpringTerrain;
+const LandscapeTileDir = assets_mod.LandscapeTileDir;
+
+const player_mod = @import("../game/player.zig");
 const Character = player_mod.Character;
-const CharacterAssets = player_mod.CharacterAssets;
+const CharacterAssets = assets_mod.CharacterAssets;
 
 const ClientGameState = @import("../client/game_state.zig").ClientGameState;
 const client = @import("../client/udp_client.zig");
@@ -15,22 +23,33 @@ const command = @import("../movement/command.zig");
 const MovementCommand = @import("../movement/command.zig").MovementCommand;
 const MoveDirection = command.MoveDirection;
 
-const ui_menu = @import("../ui/menu.zig");
+const ui_menu = @import("../client/ui/menu.zig");
 const MenuItem = ui_menu.MenuItem;
 const Menu = ui_menu.Menu;
 
-const plot_ui = @import("../plot/plot_ui.zig");
+const plot_ui = @import("../client/ui/plot.zig");
 const PlotRenderStyle = plot_ui.PlotRenderStyle;
 const plot_decoration = @import("../plot/plot_decoration.zig");
 const Plot = @import("../plot/plot.zig").Plot;
+const widgets = @import("../client/ui/widgets.zig");
 
-const Frames = shared.Frames;
-const LandscapeTile = shared.LandscapeTile;
-const SceneAction = @import("../core/scene_action.zig").SceneAction;
+// Old asset system (deprecated - migrate to assets/mod.zig when possible)
+const landscape_mod = @import("../client/tiles/landscape.zig");
+const LandscapeTile = landscape_mod.LandscapeTile;
+const drawLandscapeTile = landscape_mod.drawLandscapeTile;
+const sheets = @import("../client/tiles/sheets.zig");
+const Frames = sheets.SpriteSet;
+const FenceAsset = sheets.FenceAsset;
+
+const SceneAction = core.SceneAction;
+const ModalMenu = ui_menu.ModalMenu;
+const ModalMenuAction = ui_menu.ModalMenuAction;
+
+const MenuPage = enum { Home, Plot, Visit, Marketplace };
 
 pub const WorldScreen = struct {
     allocator: std.mem.Allocator,
-    world: shared.World,
+    world: core.World,
     player: Character,
     assets: CharacterAssets,
 
@@ -41,18 +60,24 @@ pub const WorldScreen = struct {
     camera: rl.Camera2D,
     minimap: rl.RenderTexture2D,
 
-    // Textures & Sprites
+    // Textures & Sprites (old system - to be deprecated)
     tileset_texture: rl.Texture2D,
     townhall_texture: rl.Texture2D,
     lake_texture: rl.Texture2D,
-    fence_asset: shared.sheets.FenceAsset,
+    fence_asset: FenceAsset,
     grass: Frames,
+
+    // New enum-based assets
+    tile_assets: TileAssets,
 
     // UI
     top_menu: Menu,
     menu_texture: rl.Texture2D,
     map_opened: bool = false,
     active_menu_item: ?usize = null,
+    modal_menu: ModalMenu,
+    modal_active: ?usize = null,
+    modal_page: MenuPage = .Home,
 
     // Plot system
     plot_style: PlotRenderStyle,
@@ -76,15 +101,15 @@ pub const WorldScreen = struct {
         const assets_cache = ctx.assets;
 
         // Load World
-        var world = shared.World.loadFromFile(allocator, "assets/worldoutput.json") catch |err| blk: {
+        var world = core.World.loadFromFile(allocator, "assets/worldoutput.json") catch |err| blk: {
             std.debug.print("Could not load worldoutput.json: {}, falling back to world.json\n", .{err});
-            break :blk try shared.World.loadFromFile(allocator, "assets/world.json");
+            break :blk try core.World.loadFromFile(allocator, "assets/world.json");
         };
         errdefer world.deinit(allocator);
 
         // Assets
         // CharacterAssets handles its own loading for now, could be refactored later to use cache
-        const char_assets = try CharacterAssets.loadMainCharacter();
+        const char_assets = try CharacterAssets.init();
         errdefer char_assets.deinit();
 
         const tileset_texture = try assets_cache.getTexture("assets/farmrpg/tileset/tilesetspring.png");
@@ -96,7 +121,7 @@ pub const WorldScreen = struct {
 
         const fence_texture = try assets_cache.getTexture("assets/farmrpg/objects/fencescopiar.png");
         rl.setTextureFilter(fence_texture, .point);
-        const fence_asset = shared.sheets.FenceAsset.init(fence_texture);
+        const fence_asset = FenceAsset.init(fence_texture);
 
         const grass = Frames{
             .SpringTiles = .{
@@ -130,6 +155,13 @@ pub const WorldScreen = struct {
             .server_port = 9999,
         });
 
+        // Initialize new enum-based tile assets
+        const tile_assets = try TileAssets.init();
+        errdefer {
+            var tmp = tile_assets;
+            tmp.deinit();
+        }
+
         return WorldScreen{
             .allocator = allocator,
             .world = world,
@@ -145,8 +177,10 @@ pub const WorldScreen = struct {
             .lake_texture = lake_texture,
             .fence_asset = fence_asset,
             .grass = grass,
+            .tile_assets = tile_assets,
             .top_menu = top_menu,
             .menu_texture = menu_texture,
+            .modal_menu = ModalMenu.init(.{}),
             .plot_style = PlotRenderStyle{},
         };
     }
@@ -174,6 +208,8 @@ pub const WorldScreen = struct {
         // rl.unloadTexture(self.tileset_texture);
 
         self.assets.deinit();
+        var tmp_tile_assets = self.tile_assets;
+        tmp_tile_assets.deinit();
         self.world.deinit(self.allocator);
     }
 
@@ -202,59 +238,68 @@ pub const WorldScreen = struct {
     }
 
     pub fn update(self: *WorldScreen, dt: f32, ctx: anytype) SceneAction {
-        _ = ctx; // potentially unused
-
+        const screen_width = ctx.screen_width;
+        const mouse = rl.getMousePosition();
         var move_cmd: ?MovementCommand = null;
 
-        // Handle keyboard input
-        if (rl.isKeyDown(.w) or rl.isKeyDown(.up)) {
-            move_cmd = .{ .direction = .Up, .speed = SPEED, .delta = dt };
-        } else if (rl.isKeyDown(.s) or rl.isKeyDown(.down)) {
-            move_cmd = .{ .direction = .Down, .speed = SPEED, .delta = dt };
-        } else if (rl.isKeyDown(.a) or rl.isKeyDown(.left)) {
-            move_cmd = .{ .direction = .Left, .speed = SPEED, .delta = dt };
-        } else if (rl.isKeyDown(.d) or rl.isKeyDown(.right)) {
-            move_cmd = .{ .direction = .Right, .speed = SPEED, .delta = dt };
-        } else if (rl.isKeyPressed(.m)) {
-            self.toggle_map();
-        } else if (rl.isKeyPressed(.p)) {
-            // Toggle plot visibility
-            self.show_plots = !self.show_plots;
-        } else if (rl.isKeyPressed(.g)) {
-            self.show_tile_grid = !self.show_tile_grid;
-        } else if (rl.isKeyPressed(.f)) {
-            self.show_fences = !self.show_fences;
-        } else if (rl.isKeyPressed(.n)) {
-            self.show_sprite_debug = !self.show_sprite_debug;
-        }
-
-        self.nearby_plot_id = findNearbyPlot(self.game_state.getPlots(), self.world, self.player);
-
-        if (rl.isKeyPressed(.e)) {
-            if (self.nearby_plot_id) |plot_id| {
-                self.selected_plot_id = plot_id;
-                if (self.game_state.getPlotById(plot_id)) |plot| {
-                    std.debug.print("Selected plot #{} at ({}, {}), size {}x{}\n", .{
-                        plot.id,
-                        plot.tile_x,
-                        plot.tile_y,
-                        plot.width_tiles,
-                        plot.height_tiles,
-                    });
-                    if (plot.owner.kind != .none) {
-                        std.debug.print("  Owner: {any}\n", .{plot.owner});
-                    } else {
-                        std.debug.print("  Unclaimed\n", .{});
-                    }
-                }
-            } else {
-                self.selected_plot_id = null;
+        if (self.modal_menu.is_open) {
+            if (rl.isKeyPressed(.escape)) {
+                self.modal_menu.close();
             }
-        }
+        } else {
+            if (rl.isKeyPressed(.escape) or (rl.isMouseButtonPressed(.left) and rl.checkCollisionPointRec(mouse, menuButtonRect(screen_width)))) {
+                self.modal_menu.open();
+            }
 
-        if (move_cmd) |cmd| {
-            applyMoveToVector(&self.player.pos, cmd, self.world);
-            _ = self.game_state.pushInput(cmd);
+            // Handle keyboard input
+            if (rl.isKeyDown(.w) or rl.isKeyDown(.up)) {
+                move_cmd = .{ .direction = .Up, .speed = SPEED, .delta = dt };
+            } else if (rl.isKeyDown(.s) or rl.isKeyDown(.down)) {
+                move_cmd = .{ .direction = .Down, .speed = SPEED, .delta = dt };
+            } else if (rl.isKeyDown(.a) or rl.isKeyDown(.left)) {
+                move_cmd = .{ .direction = .Left, .speed = SPEED, .delta = dt };
+            } else if (rl.isKeyDown(.d) or rl.isKeyDown(.right)) {
+                move_cmd = .{ .direction = .Right, .speed = SPEED, .delta = dt };
+            } else if (rl.isKeyPressed(.m)) {
+                self.toggle_map();
+            } else if (rl.isKeyPressed(.p)) {
+                self.show_plots = !self.show_plots;
+            } else if (rl.isKeyPressed(.g)) {
+                self.show_tile_grid = !self.show_tile_grid;
+            } else if (rl.isKeyPressed(.f)) {
+                self.show_fences = !self.show_fences;
+            } else if (rl.isKeyPressed(.n)) {
+                self.show_sprite_debug = !self.show_sprite_debug;
+            }
+
+            self.nearby_plot_id = findNearbyPlot(self.game_state.getPlots(), self.world, self.player);
+
+            if (rl.isKeyPressed(.e)) {
+                if (self.nearby_plot_id) |plot_id| {
+                    self.selected_plot_id = plot_id;
+                    if (self.game_state.getPlotById(plot_id)) |plot| {
+                        std.debug.print("Selected plot #{} at ({}, {}), size {}x{}\n", .{
+                            plot.id,
+                            plot.tile_x,
+                            plot.tile_y,
+                            plot.width_tiles,
+                            plot.height_tiles,
+                        });
+                        if (plot.owner.kind != .none) {
+                            std.debug.print("  Owner: {any}\n", .{plot.owner});
+                        } else {
+                            std.debug.print("  Unclaimed\n", .{});
+                        }
+                    }
+                } else {
+                    self.selected_plot_id = null;
+                }
+            }
+
+            if (move_cmd) |cmd| {
+                applyMoveToVector(&self.player.pos, cmd, self.world);
+                _ = self.game_state.pushInput(cmd);
+            }
         }
 
         // Camera Update
@@ -287,7 +332,7 @@ pub const WorldScreen = struct {
 
         rl.beginMode2D(render_camera);
 
-        shared.drawGrassBackground(self.grass, self.world);
+        drawGrassBackground(self.grass, self.world);
 
         // Draw plots before buildings (so buildings appear on top)
         if (self.show_plots) {
@@ -346,8 +391,8 @@ pub const WorldScreen = struct {
         // Let's handle keys directly for now to be safe and avoid static globals.
         // I will stub the menu actions.
 
-        const menu_items = [_]MenuItem{};
-        self.top_menu.drawAsSidebar(250, screen_height, menu_items[0..], &self.active_menu_item, "Construction");
+        const sidebar_items = [_]MenuItem{};
+        self.top_menu.drawAsSidebar(250, screen_height, sidebar_items[0..], &self.active_menu_item, "Construction");
 
         if (self.map_opened) {
             const minimap_pos = rl.Vector2{
@@ -366,12 +411,37 @@ pub const WorldScreen = struct {
 
         // Plot controls help text
         const help_y = screen_height - 80;
-        rl.drawText("P: Plots | G: Grid | F: Fences | B: Debug | M: Map", 10, help_y, 16, rl.Color.init(200, 200, 200, 255));
+        rl.drawText("P: Plots | G: Grid | F: Fences | B: Debug | M: Map | ESC: Menu", 10, help_y, 16, rl.Color.init(200, 200, 200, 255));
 
         if (self.nearby_plot_id) |plot_id| {
             var nearby_buf: [64]u8 = undefined;
             const nearby_text = std.fmt.bufPrintZ(&nearby_buf, "Press E to select Plot #{}", .{plot_id}) catch "";
             rl.drawText(nearby_text, 10, help_y + 20, 20, rl.Color.init(255, 255, 0, 255));
+        }
+
+        const menu_rect = menuButtonRect(screen_width);
+        _ = widgets.drawSimpleButton("Menu", menu_rect, rl.getMousePosition());
+
+        const menu_items = [_]MenuItem{
+            .{ .label = "Home", .action = menuNoop },
+            .{ .label = "My Plot", .action = menuNoop },
+            .{ .label = "Visit", .action = menuNoop },
+            .{ .label = "Marketplace", .action = menuNoop },
+        };
+
+        const menu_action = self.modal_menu.draw(
+            screen_width,
+            screen_height,
+            menuTitle(self.modal_page),
+            menuBody(self.modal_page),
+            menu_items[0..],
+            &self.modal_active,
+        );
+
+        switch (menu_action) {
+            .Select => |idx| self.modal_page = menuPageFromIndex(idx),
+            .Back => self.modal_menu.close(),
+            else => {},
         }
 
         if (self.show_sprite_debug) {
@@ -380,9 +450,48 @@ pub const WorldScreen = struct {
     }
 };
 
+fn menuTitle(page: MenuPage) [:0]const u8 {
+    return switch (page) {
+        .Home => "Home",
+        .Plot => "My Plot",
+        .Visit => "Visit",
+        .Marketplace => "Marketplace",
+    };
+}
+
+fn menuBody(page: MenuPage) [:0]const u8 {
+    return switch (page) {
+        .Home => "Choose a destination from the menu.",
+        .Plot => "Plot view placeholder.",
+        .Visit => "Visit feature placeholder.",
+        .Marketplace => "Marketplace feature placeholder.",
+    };
+}
+
+fn menuButtonRect(screen_width: i32) rl.Rectangle {
+    return .{
+        .x = @as(f32, @floatFromInt(screen_width)) - 140.0,
+        .y = 10.0,
+        .width = 120.0,
+        .height = 36.0,
+    };
+}
+
+fn menuPageFromIndex(idx: usize) MenuPage {
+    return switch (idx) {
+        0 => .Home,
+        1 => .Plot,
+        2 => .Visit,
+        3 => .Marketplace,
+        else => .Home,
+    };
+}
+
+fn menuNoop() void {}
+
 // Helper Functions (Copied from main.zig)
 
-fn findNearbyPlot(plots: []const Plot, world: shared.World, player: Character) ?u64 {
+fn findNearbyPlot(plots: []const Plot, world: core.World, player: Character) ?u64 {
     const player_rect = rl.Rectangle{
         .x = player.pos.x,
         .y = player.pos.y,
@@ -430,7 +539,7 @@ fn findNearbyPlot(plots: []const Plot, world: shared.World, player: Character) ?
     return closest_plot_id;
 }
 
-fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: shared.World) void {
+fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32, screen_height: i32, world: core.World) void {
     const view_half_w: f32 = (@as(f32, @floatFromInt(screen_width)) * 0.5) / camera.zoom;
     const view_half_h: f32 = (@as(f32, @floatFromInt(screen_height)) * 0.5) / camera.zoom;
     var cam_target_x: f32 = player.pos.x + player.size.x * 0.5;
@@ -441,7 +550,7 @@ fn updateCameraFocus(camera: *rl.Camera2D, player: Character, screen_width: i32,
     camera.target = .init(cam_target_x, cam_target_y);
 }
 
-fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, tileset_texture: rl.Texture2D, world: shared.World) void {
+fn drawConstruction(townhall_texture: rl.Texture2D, lake_texture: rl.Texture2D, tileset_texture: rl.Texture2D, world: core.World) void {
     const tile_w = world.width / @as(f32, @floatFromInt(world.tiles_x));
     const tile_h = world.height / @as(f32, @floatFromInt(world.tiles_y));
 
@@ -519,7 +628,7 @@ fn drawOtherPlayer(other_player: anytype, assets: CharacterAssets) void {
     rl.drawTexturePro(texture, src, dest, rl.Vector2{ .x = 0, .y = 0 }, 0, rl.Color{ .r = 200, .g = 200, .b = 255, .a = 255 });
 }
 
-fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: shared.World, size: f32, MINIMAP_POS: rl.Vector2) void {
+fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: core.World, size: f32, MINIMAP_POS: rl.Vector2) void {
     {
         rl.beginTextureMode(target);
         defer rl.endTextureMode();
@@ -569,4 +678,41 @@ fn updateMinimap(target: rl.RenderTexture2D, player_pos: rl.Vector2, world: shar
     };
     rl.drawTexturePro(target.texture, src, dst, rl.Vector2{ .x = 0, .y = 0 }, 0, .white);
     rl.drawRectangleLines(@intFromFloat(dst.x), @intFromFloat(dst.y), @intFromFloat(size), @intFromFloat(size), .black);
+}
+
+// ==================================================================================
+// Legacy utility function for drawing grass backgrounds
+// TODO: Migrate to new enum-based asset system (assets/mod.zig)
+// ==================================================================================
+fn drawGrassBackground(grass: Frames, world: core.World) void {
+    const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
+    const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
+
+    var ty: i32 = 0;
+    while (ty < world.tiles_y) : (ty += 1) {
+        var tx: i32 = 0;
+        while (tx < world.tiles_x) : (tx += 1) {
+            const x = @as(f32, @floatFromInt(tx)) * tile_w;
+            const y = @as(f32, @floatFromInt(ty)) * tile_h;
+
+            const dir: LandscapeTile.Dir = blk: {
+                const is_left = tx == 0;
+                const is_right = tx == world.tiles_x - 1;
+                const is_top = ty == 0;
+                const is_bottom = ty == world.tiles_y - 1;
+
+                if (is_left and is_top) break :blk .TopLeftCorner;
+                if (is_right and is_top) break :blk .TopRightCorner;
+                if (is_left and is_bottom) break :blk .BottomLeftCorner;
+                if (is_right and is_bottom) break :blk .BottomRightCorner;
+                if (is_left) break :blk .Left;
+                if (is_right) break :blk .Right;
+                if (is_top) break :blk .Top;
+                if (is_bottom) break :blk .Bottom;
+                break :blk .Center;
+            };
+
+            drawLandscapeTile(grass, dir, x, y);
+        }
+    }
 }

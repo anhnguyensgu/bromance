@@ -1,5 +1,6 @@
 const Renderer = @import("../renderer.zig").Renderer;
-const GameState = @import("../state.zig").GameState;
+const scenes = @import("../../scenes/mod.zig");
+const UIState = scenes.UIState;
 
 pub const Hud = struct {
     pub fn init() Hud {
@@ -9,7 +10,7 @@ pub const Hud = struct {
     pub fn render(
         self: *const Hud,
         renderer: *Renderer,
-        state: *const GameState,
+        state: *const UIState,
     ) void {
         _ = self;
 
@@ -23,7 +24,7 @@ pub const Hud = struct {
         renderer.drawHudLine(
             "Stamina",
             "{d}%",
-            .{ stamina_percent },
+            .{stamina_percent},
         );
         renderer.drawHudLine("Coins", "{d}", .{state.coins()});
     }

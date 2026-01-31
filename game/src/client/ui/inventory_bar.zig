@@ -1,5 +1,6 @@
 const Renderer = @import("../renderer.zig").Renderer;
-const GameState = @import("../state.zig").GameState;
+const scenes = @import("../../scenes/mod.zig");
+const UIState = scenes.UIState;
 
 pub const InventoryBarUI = struct {
     const HotbarSettings = struct {
@@ -23,7 +24,7 @@ pub const InventoryBarUI = struct {
     pub fn render(
         self: *const InventoryBarUI,
         renderer: *Renderer,
-        state: *const GameState,
+        state: *const UIState,
     ) void {
         _ = self;
         renderer.drawBanner("Inventory Hotbar");

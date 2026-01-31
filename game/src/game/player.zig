@@ -1,72 +1,25 @@
+// ==================================================================================
+// Player Entity State
+// ==================================================================================
+// This module defines the player character entity.
+// RESPONSIBILITIES:
+// - Player position and animation state
+// - Visual rendering of the player character
+// - Animation frame updates based on movement
+//
+// Separation from other states:
+// - Character (this file): Player entity position and animation
+// - ClientGameState (client/game_state.zig): Network sync and interpolation
+// - UIState (screens/ui_state.zig): HUD display values (stamina, hearts)
+// - World (core/world.zig): World collision and terrain
+// ==================================================================================
+
 const rl = @import("raylib");
 const MoveDirection = @import("../movement/command.zig").MoveDirection;
-
-pub const CharacterAssets = struct {
-    idle_up: rl.Texture2D,
-    idle_down: rl.Texture2D,
-    idle_left: rl.Texture2D,
-    idle_right: rl.Texture2D,
-    walk_up: rl.Texture2D,
-    walk_down: rl.Texture2D,
-    walk_left: rl.Texture2D,
-    walk_right: rl.Texture2D,
-    shadow: rl.Texture2D,
-
-    pub fn loadMainCharacter() !CharacterAssets {
-        const idle_up = try rl.loadTexture("assets/maincharacter/maincidleback.png");
-        errdefer rl.unloadTexture(idle_up);
-
-        const idle_down = try rl.loadTexture("assets/maincharacter/maincidlefront.png");
-        errdefer rl.unloadTexture(idle_down);
-
-        const idle_left = try rl.loadTexture("assets/maincharacter/maincidleleft.png");
-        errdefer rl.unloadTexture(idle_left);
-
-        const idle_right = try rl.loadTexture("assets/maincharacter/maincidleright.png");
-        errdefer rl.unloadTexture(idle_right);
-
-        const walk_up = try rl.loadTexture("assets/maincharacter/maincwalkback.png");
-        errdefer rl.unloadTexture(walk_up);
-
-        const walk_down = try rl.loadTexture("assets/maincharacter/maincwalkfront.png");
-        errdefer rl.unloadTexture(walk_down);
-
-        const walk_left = try rl.loadTexture("assets/maincharacter/maincwalkleft.png");
-        errdefer rl.unloadTexture(walk_left);
-
-        const walk_right = try rl.loadTexture("assets/maincharacter/maincwalkright.png");
-        errdefer rl.unloadTexture(walk_right);
-
-        const shadow = try rl.loadTexture("assets/maincharacter/maincshadow.png");
-        errdefer rl.unloadTexture(shadow);
-
-        return .{
-            .idle_up = idle_up,
-            .idle_down = idle_down,
-            .idle_left = idle_left,
-            .idle_right = idle_right,
-            .walk_up = walk_up,
-            .walk_down = walk_down,
-            .walk_left = walk_left,
-            .walk_right = walk_right,
-            .shadow = shadow,
-        };
-    }
-
-    pub fn deinit(self: CharacterAssets) void {
-        rl.unloadTexture(self.idle_up);
-        rl.unloadTexture(self.idle_down);
-        rl.unloadTexture(self.idle_left);
-        rl.unloadTexture(self.idle_right);
-        rl.unloadTexture(self.walk_up);
-        rl.unloadTexture(self.walk_down);
-        rl.unloadTexture(self.walk_left);
-        rl.unloadTexture(self.walk_right);
-        rl.unloadTexture(self.shadow);
-    }
-};
+const CharacterAssets = @import("../assets/mod.zig").CharacterAssets;
 
 pub const Character = struct {
+    // Player entity - position, animation, rendering
     pos: rl.Vector2,
     size: rl.Vector2,
     dir: MoveDirection,

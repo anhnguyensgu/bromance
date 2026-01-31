@@ -1,10 +1,12 @@
 const std = @import("std");
 const posix = std.posix;
 
-const shared = @import("shared.zig");
-const network = shared.network;
+const core = @import("core/mod.zig");
+const plot_mod = @import("plot/plot.zig");
+const network = @import("network.zig");
+const PlayerStore = @import("db/player_store.zig").PlayerStore;
 
-fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
+fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]plot_mod.Plot {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
@@ -24,7 +26,7 @@ fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
     const root = parsed.value.object;
     const plots_array = root.get("plots").?.array;
 
-    const plots = try allocator.alloc(shared.Plot, plots_array.items.len);
+    const plots = try allocator.alloc(plot_mod.Plot, plots_array.items.len);
 
     for (plots_array.items, 0..) |plot_obj, i| {
         const obj = plot_obj.object;
@@ -34,20 +36,20 @@ fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
         const width_tiles = @as(i32, @intCast(obj.get("width_tiles").?.integer));
         const height_tiles = @as(i32, @intCast(obj.get("height_tiles").?.integer));
 
-        var owner = shared.OwnerId.none();
+        var owner = plot_mod.OwnerId.none();
         if (obj.get("owner")) |owner_obj| {
             const owner_data = owner_obj.object;
             const kind_str = owner_data.get("kind").?.string;
             const kind = parseOwnerIdKind(kind_str) orelse .none;
 
             if (owner_data.get("value")) |value_str| {
-                owner = shared.OwnerId.init(kind, value_str.string);
+                owner = plot_mod.OwnerId.init(kind, value_str.string);
             } else {
-                owner = shared.OwnerId{ .kind = kind };
+                owner = plot_mod.OwnerId{ .kind = kind };
             }
         }
 
-        plots[i] = shared.Plot{
+        plots[i] = plot_mod.Plot{
             .id = id,
             .tile_x = tile_x,
             .tile_y = tile_y,
@@ -60,7 +62,7 @@ fn loadPlots(allocator: std.mem.Allocator, path: []const u8) ![]shared.Plot {
     return plots;
 }
 
-fn parseOwnerIdKind(kind_str: []const u8) ?shared.OwnerIdKind {
+fn parseOwnerIdKind(kind_str: []const u8) ?plot_mod.OwnerIdKind {
     if (std.mem.eql(u8, kind_str, "none")) return .none;
     if (std.mem.eql(u8, kind_str, "wallet")) return .wallet;
     if (std.mem.eql(u8, kind_str, "ens")) return .ens;
@@ -71,21 +73,27 @@ fn parseOwnerIdKind(kind_str: []const u8) ?shared.OwnerIdKind {
 
 const Client = struct {
     address: std.net.Address,
-    state: shared.PlayerState,
+    state: core.PlayerState,
     last_heard_ns: i64,
+    dirty: bool = false,
 };
 
 // Housekeeping configuration
 const CLIENT_TIMEOUT_NS: i64 = 30 * std.time.ns_per_s; // 30 seconds without activity = disconnected
 const HOUSEKEEPING_INTERVAL_NS: i64 = 5 * std.time.ns_per_s; // Check every 5 seconds
 
+const DB_PATH: [:0]const u8 = "data/player_state.sqlite";
+const DEFAULT_SPAWN_X: f32 = 350.0;
+const DEFAULT_SPAWN_Y: f32 = 200.0;
+
 const UdpEchoServer = struct {
     sock: posix.socket_t,
     buffer: [1024]u8 = undefined,
     clients: std.AutoHashMap(u32, Client),
     allocator: std.mem.Allocator,
-    world: shared.World,
-    plots: []shared.Plot,
+    world: core.World,
+    plots: []plot_mod.Plot,
+    player_store: PlayerStore,
     last_housekeeping_ns: i64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, bind_port: u16) !UdpEchoServer {
@@ -103,27 +111,52 @@ const UdpEchoServer = struct {
         _ = try posix.fcntl(sock, posix.F.SETFL, flags);
 
         // Load world data for collision detection
-        const world = try shared.World.loadFromFile(allocator, "assets/worldoutput.json");
+        const world = try core.World.loadFromFile(allocator, "assets/worldoutput.json");
 
         const plots = try loadPlots(allocator, "assets/plots.json");
 
+        const player_store = try PlayerStore.init(DB_PATH);
+
         const now: i64 = @intCast(std.time.nanoTimestamp());
 
-        return .{
+        var server = UdpEchoServer{
             .sock = sock,
             .clients = std.AutoHashMap(u32, Client).init(allocator),
             .allocator = allocator,
             .world = world,
             .plots = plots,
+            .player_store = player_store,
             .last_housekeeping_ns = now,
         };
+
+        // Start persist thread after server is fully initialized
+        try server.player_store.startPersistThread();
+
+        return server;
     }
 
     pub fn deinit(self: *UdpEchoServer) void {
+        self.flushAllDirtyClients();
+        self.player_store.deinit();
         self.world.deinit(self.allocator);
         self.allocator.free(self.plots);
         self.clients.deinit();
         posix.close(self.sock);
+    }
+
+    fn flushAllDirtyClients(self: *UdpEchoServer) void {
+        self.queueDirtyClientsForPersist();
+    }
+
+    fn queueDirtyClientsForPersist(self: *UdpEchoServer) void {
+        var it = self.clients.iterator();
+        while (it.next()) |entry| {
+            const client = entry.value_ptr;
+            if (client.dirty) {
+                self.player_store.queuePersist(entry.key_ptr.*, .{ .x = client.state.x, .y = client.state.y });
+                client.dirty = false;
+            }
+        }
     }
 
     pub fn boundPort(self: *const UdpEchoServer) !u16 {
@@ -177,12 +210,28 @@ const UdpEchoServer = struct {
         // Get or create client
         const res = try self.clients.getOrPut(session_id);
         if (!res.found_existing) {
+            const loaded_state = self.player_store.loadPlayerState(session_id) catch |err| blk: {
+                std.debug.print("Failed to load player state: {s}\n", .{@errorName(err)});
+                break :blk null;
+            };
+
+            const initial_state = if (loaded_state) |state|
+                core.PlayerState{ .x = state.x, .y = state.y }
+            else
+                core.PlayerState{ .x = DEFAULT_SPAWN_X, .y = DEFAULT_SPAWN_Y };
+
             res.value_ptr.* = .{
                 .address = addr,
-                .state = .{ .x = 0, .y = 0 },
+                .state = initial_state,
                 .last_heard_ns = now,
+                .dirty = false,
             };
-            std.debug.print("New player connected: session_id={d}, total_clients={d}\n", .{ session_id, self.clients.count() });
+
+            if (loaded_state != null) {
+                std.debug.print("Player reconnected: session_id={d}, restored pos=({d:.1}, {d:.1}), total_clients={d}\n", .{ session_id, initial_state.x, initial_state.y, self.clients.count() });
+            } else {
+                std.debug.print("New player connected: session_id={d}, spawn=({d:.1}, {d:.1}), total_clients={d}\n", .{ session_id, initial_state.x, initial_state.y, self.clients.count() });
+            }
             try self.sendPlots(&addr, ack_seq);
         }
 
@@ -198,16 +247,26 @@ const UdpEchoServer = struct {
             },
             .move => |m| {
                 self.integrateMove(m, &client.state);
+                client.dirty = true;
                 try self.broadcastAllPlayers(ack_seq);
             },
             .leave => |l| {
                 std.debug.print("Player leaving: session_id={d}, reason={d}\n", .{ session_id, l.reason });
-                _ = self.clients.remove(session_id);
+                self.persistAndRemoveClient(session_id);
                 std.debug.print("Player removed, total_clients={d}\n", .{self.clients.count()});
                 try self.broadcastAllPlayers(ack_seq);
             },
             .state_update, .all_players_state, .plots_sync => {},
         }
+    }
+
+    fn persistAndRemoveClient(self: *UdpEchoServer, session_id: u32) void {
+        if (self.clients.get(session_id)) |client| {
+            if (client.dirty) {
+                self.player_store.queuePersist(session_id, .{ .x = client.state.x, .y = client.state.y });
+            }
+        }
+        _ = self.clients.remove(session_id);
     }
 
     fn runHousekeeping(self: *UdpEchoServer) !void {
@@ -240,16 +299,19 @@ const UdpEchoServer = struct {
             }
         }
 
-        // Remove stale clients
+        // Remove stale clients (persist before removing)
         if (stale_count > 0) {
             for (stale_clients[0..stale_count]) |session_id| {
-                _ = self.clients.remove(session_id);
+                self.persistAndRemoveClient(session_id);
             }
             std.debug.print("Removed {d} stale client(s), total_clients={d}\n", .{ stale_count, self.clients.count() });
 
             // Broadcast updated player list to remaining clients
             try self.broadcastAllPlayers(0);
         }
+
+        // Queue dirty clients for async persistence (thread handles actual DB writes)
+        self.queueDirtyClientsForPersist();
     }
 
     fn broadcastAllPlayers(self: *UdpEchoServer, ack_seq: u32) !void {
@@ -278,7 +340,7 @@ const UdpEchoServer = struct {
         }
     }
 
-    fn integrateMove(self: *UdpEchoServer, move: network.MovePayload, pos: *shared.PlayerState) void {
+    fn integrateMove(self: *UdpEchoServer, move: network.MovePayload, pos: *core.PlayerState) void {
         const PLAYER_SIZE: f32 = 32.0;
         const move_amount = move.speed * move.delta;
 
@@ -302,7 +364,7 @@ const UdpEchoServer = struct {
         }
     }
 
-    fn sendState(self: *UdpEchoServer, addr: *const std.net.Address, ack_seq: u32, state: shared.PlayerState) !void {
+    fn sendState(self: *UdpEchoServer, addr: *const std.net.Address, ack_seq: u32, state: core.PlayerState) !void {
         const payload = network.PacketPayload{ .state_update = network.StatePayload{
             .x = state.x,
             .y = state.y,

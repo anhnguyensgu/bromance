@@ -1,35 +1,41 @@
 const std = @import("std");
 const rl = @import("raylib");
-const shared = @import("shared");
-const Menu = shared.menu.Menu;
-const MenuItem = shared.menu.MenuItem;
+
+// Core imports
+const core = @import("core/mod.zig");
+
+// UI components
+const ui_menu = @import("client/ui/menu.zig");
+const Menu = ui_menu.Menu;
+const MenuItem = ui_menu.MenuItem;
 
 // Import the new auto-tile system
-const tiles = shared.tiles;
+const tiles = @import("client/tiles/layer.zig");
 const TileLayer = tiles.TileLayer;
 const AutoTileConfig = tiles.AutoTileConfig;
 const AutoTileRenderer = tiles.AutoTileRenderer;
 const Terrain = tiles.Terrain;
 const MultiLayerTileMap = tiles.MultiLayerTileMap;
 
-// Shared landscape/frames types
-const sheets = shared.sheets;
-pub const LandscapeTile = shared.LandscapeTile;
-pub const Frames = shared.Frames;
-const drawGrassBackground = shared.drawGrassBackground;
+// Shared landscape/frames types (old system - deprecated)
+const landscape_mod = @import("client/tiles/landscape.zig");
+pub const LandscapeTile = landscape_mod.LandscapeTile;
+const sheets = @import("client/tiles/sheets.zig");
+pub const Frames = sheets.SpriteSet;
 
 // Import the placement system
-const placement = shared.placement;
+const placement = @import("client/ui/placement.zig");
 const PlacementSystem = placement.PlacementSystem;
 const PlaceableItem = placement.PlaceableItem;
 
 // Import the new dynamic Map system
-const editor_map = shared.editor_map;
+const editor_map = @import("map/editor_map.zig");
 const Map = editor_map.Map;
 const TileId = editor_map.TileId;
 
 // Shared GhostLayer for applying placement results
-const GhostLayer = shared.ghost_layer.GhostLayer;
+const ui_ghost_layer = @import("client/ui/ghost_layer.zig");
+const GhostLayer = ui_ghost_layer.GhostLayer;
 
 // Global editor map reference for save callback
 var g_editor_map: ?*Map = null;
@@ -70,14 +76,14 @@ pub fn main() !void {
     defer rl.unloadTexture(house_texture);
     rl.setTextureFilter(house_texture, .point);
 
-    const house_sprites = shared.sheets.SpriteSet.HouseSheet(house_texture);
+    const house_sprites = sheets.SpriteSet.HouseSheet(house_texture);
     defer house_sprites.House.deinit();
 
     const lake_img = try rl.loadImage("assets/lakesmall.png");
     defer rl.unloadImage(lake_img);
     const lake_texture = try rl.loadTextureFromImage(lake_img);
     rl.setTextureFilter(lake_texture, .point);
-    const lake_sprites = shared.sheets.SpriteSet.LakeSheet(lake_texture);
+    const lake_sprites = sheets.SpriteSet.LakeSheet(lake_texture);
     defer lake_sprites.Lake.deinit();
 
     const grass = Frames{
@@ -91,9 +97,9 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var world = shared.World.loadFromFile(allocator, "assets/worldoutput.json") catch |err| blk: {
+    var world = core.World.loadFromFile(allocator, "assets/worldoutput.json") catch |err| blk: {
         std.debug.print("Could not load worldoutput.json: {}, falling back to worldedit.json\n", .{err});
-        break :blk try shared.World.loadFromFile(allocator, "assets/worldedit.json");
+        break :blk try core.World.loadFromFile(allocator, "assets/worldedit.json");
     };
     defer world.deinit(allocator);
 
@@ -466,7 +472,7 @@ fn drawButton(rect: rl.Rectangle, text: [:0]const u8, mouse: rl.Vector2, clicked
     return pressed;
 }
 
-fn drawMapResizeControls(allocator: std.mem.Allocator, map: *Map, world: *shared.World, x: f32, y: f32) !void {
+fn drawMapResizeControls(allocator: std.mem.Allocator, map: *Map, world: *core.World, x: f32, y: f32) !void {
     _ = allocator;
     const mouse = rl.getMousePosition();
     const clicked = rl.isMouseButtonPressed(rl.MouseButton.left);
@@ -549,5 +555,42 @@ fn drawMenuItem(item: *const MenuItem, rect: rl.Rectangle, active: bool, hovered
         const text_x = @as(i32, @intFromFloat(rect.x + 10));
         const text_y = @as(i32, @intFromFloat(rect.y + (rect.height - 20) / 2));
         rl.drawText(item.label, text_x, text_y, 20, if (active) rl.Color.white else rl.Color.black);
+    }
+}
+
+// ==================================================================================
+// Legacy utility function for drawing grass backgrounds
+// TODO: Migrate to new enum-based asset system (assets/mod.zig)
+// ==================================================================================
+fn drawGrassBackground(grass: Frames, world: core.World) void {
+    const tile_w: f32 = world.width / @as(f32, @floatFromInt(world.tiles_x));
+    const tile_h: f32 = world.height / @as(f32, @floatFromInt(world.tiles_y));
+
+    var ty: i32 = 0;
+    while (ty < world.tiles_y) : (ty += 1) {
+        var tx: i32 = 0;
+        while (tx < world.tiles_x) : (tx += 1) {
+            const x = @as(f32, @floatFromInt(tx)) * tile_w;
+            const y = @as(f32, @floatFromInt(ty)) * tile_h;
+
+            const dir: LandscapeTile.Dir = blk: {
+                const is_left = tx == 0;
+                const is_right = tx == world.tiles_x - 1;
+                const is_top = ty == 0;
+                const is_bottom = ty == world.tiles_y - 1;
+
+                if (is_left and is_top) break :blk .TopLeftCorner;
+                if (is_right and is_top) break :blk .TopRightCorner;
+                if (is_left and is_bottom) break :blk .BottomLeftCorner;
+                if (is_right and is_bottom) break :blk .BottomRightCorner;
+                if (is_left) break :blk .Left;
+                if (is_right) break :blk .Right;
+                if (is_top) break :blk .Top;
+                if (is_bottom) break :blk .Bottom;
+                break :blk .Center;
+            };
+
+            landscape_mod.drawLandscapeTile(grass, dir, x, y);
+        }
     }
 }

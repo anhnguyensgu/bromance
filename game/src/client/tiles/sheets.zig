@@ -1,10 +1,25 @@
 const std = @import("std");
 const rl = @import("raylib");
-const terrain = @import("./terrain.zig");
+const terrain = @import("../../core/terrain.zig");
 const landscape = @import("./landscape.zig");
-const player = @import("../character/player.zig");
+const assets_mod = @import("../../assets/mod.zig");
 
 const TerrainType = terrain.TerrainType;
+
+// ==================================================================================
+// DEPRECATED: This file will be replaced by src/assets/ module
+// ==================================================================================
+// The new enum-based assets system in src/assets/ provides:
+// - Type-safe terrain enums: SpringTerrain.grass, SpringTerrain.water, etc.
+// - Type-safe tile direction enums: LandscapeTileDir.center, .top_left_corner, etc.
+// - Cleaner API: tile_assets.spring_tiles.drawTerrain(.grass, .center, x, y)
+//
+// For new code, use:
+//   const assets = @import("../assets/mod.zig");
+//   var tile_assets = try assets.TileAssets.init();
+//
+// This file will be removed in Phase 0.7 of the refactoring plan.
+// ==================================================================================
 
 /// Simple descriptor for a sub-rectangle in a spritesheet.
 pub const SpriteRect = struct {
@@ -194,7 +209,7 @@ pub const SpriteSet = union(SpriteSheets) {
     Menu: MenuSprites,
     House: House,
     Lake: Lake,
-    MainCharacter: player.CharacterAssets,
+    MainCharacter: assets_mod.CharacterAssets,
     Fence: FenceAsset,
 
     /// Convenience constructor for a spring grass 3x3 tile block.
@@ -233,7 +248,7 @@ pub const SpriteSet = union(SpriteSheets) {
     }
 
     pub fn MainCharacterSheet() !SpriteSet {
-        return .{ .MainCharacter = try player.CharacterAssets.loadMainCharacter() };
+        return .{ .MainCharacter = try assets_mod.CharacterAssets.init() };
     }
 };
 
