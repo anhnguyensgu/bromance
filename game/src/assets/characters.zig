@@ -70,7 +70,7 @@ pub const CharacterAssets = struct {
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: Self) void {
         rl.unloadTexture(self.idle_up);
         rl.unloadTexture(self.idle_down);
         rl.unloadTexture(self.idle_left);

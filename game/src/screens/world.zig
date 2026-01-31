@@ -12,7 +12,7 @@ const LandscapeTileDir = assets_mod.LandscapeTileDir;
 
 const player_mod = @import("../game/player.zig");
 const Character = player_mod.Character;
-const CharacterAssets = player_mod.CharacterAssets;
+const CharacterAssets = assets_mod.CharacterAssets;
 
 const ClientGameState = @import("../client/game_state.zig").ClientGameState;
 const client = @import("../client/udp_client.zig");
@@ -109,7 +109,7 @@ pub const WorldScreen = struct {
 
         // Assets
         // CharacterAssets handles its own loading for now, could be refactored later to use cache
-        const char_assets = try CharacterAssets.loadMainCharacter();
+        const char_assets = try CharacterAssets.init();
         errdefer char_assets.deinit();
 
         const tileset_texture = try assets_cache.getTexture("assets/farmrpg/tileset/tilesetspring.png");

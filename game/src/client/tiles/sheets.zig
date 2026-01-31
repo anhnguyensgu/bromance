@@ -2,7 +2,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const terrain = @import("../../core/terrain.zig");
 const landscape = @import("./landscape.zig");
-const player = @import("../../game/player.zig");
+const assets_mod = @import("../../assets/mod.zig");
 
 const TerrainType = terrain.TerrainType;
 
@@ -209,7 +209,7 @@ pub const SpriteSet = union(SpriteSheets) {
     Menu: MenuSprites,
     House: House,
     Lake: Lake,
-    MainCharacter: player.CharacterAssets,
+    MainCharacter: assets_mod.CharacterAssets,
     Fence: FenceAsset,
 
     /// Convenience constructor for a spring grass 3x3 tile block.
@@ -248,7 +248,7 @@ pub const SpriteSet = union(SpriteSheets) {
     }
 
     pub fn MainCharacterSheet() !SpriteSet {
-        return .{ .MainCharacter = try player.CharacterAssets.loadMainCharacter() };
+        return .{ .MainCharacter = try assets_mod.CharacterAssets.init() };
     }
 };
 
